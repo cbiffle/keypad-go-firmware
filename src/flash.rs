@@ -119,16 +119,6 @@ unsafe fn program(flash: &device::FLASH, address: *mut u64, source: u64) {
     }
 }
 
-unsafe fn program_block(flash: &device::FLASH, address: *mut u64, source: &[u64]) {
-    enable_programming(flash);
-    let mut address = address;
-    for &word in source {
-        program(flash, address, word);
-        address = address.add(1);
-    }
-    disable_programming(flash);
-}
-
 #[derive(Debug)]
 pub struct SystemConfig {
     pub scanner: scanner::Config,

@@ -335,10 +335,6 @@ pub async fn recv(uart: &Uart) -> Result<u8, RxErr> {
     RX_AVAIL.until(|| recv_one(uart)).await
 }
 
-fn can_recv(uart: &Uart) -> bool {
-    uart.isr.read().rxne().bit_is_set()
-}
-
 fn recv_one(uart: &Uart) -> Option<Result<u8, RxErr>> {
     let isr = uart.isr.read();
 
@@ -376,14 +372,6 @@ fn recv_one(uart: &Uart) -> Option<Result<u8, RxErr>> {
     }
 
     None
-}
-
-async fn finish_transmitting(uart: &Uart) {
-    if uart.isr.read().tc().bit_is_clear() {
-        uart.cr1.modify(|_, w| w.tcie().set_bit());
-        TX_COMPLETE.until(|| uart.isr.read().tc().bit_is_set()).await;
-    }
-    uart.icr.write(|w| w.tccf().set_bit());
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
