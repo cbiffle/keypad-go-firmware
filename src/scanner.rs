@@ -78,13 +78,24 @@ pub struct Config {
     pub ghost_mask: [u8; 8],
 }
 
+impl Config {
+    /// The default for `Config` causes no lines to be driven. This is the
+    /// conservative option if we don't know anything about the outside world.
+    /// This only applies during the brief window at the start of setup, before
+    /// the setup program starts overriding the config.
+    ///
+    /// Having this value be all zeroes also ensures that statics including it
+    /// go in BSS, rather than getting an init image.
+    pub const DEFAULT: Self = Self {
+        epoch: 0,
+        driven_lines: 0,
+        ghost_mask: [0; 8],
+    };
+}
+
 impl Default for Config {
     fn default() -> Self {
-        Self {
-            epoch: 0,
-            driven_lines: 0xFF,
-            ghost_mask: [0; 8],
-        }
+        Self::DEFAULT
     }
 }
 
