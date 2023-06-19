@@ -145,10 +145,16 @@ fn main() -> ! {
     // find nothing in flash, force `setup_mode` to true.
     setup_mode |= !storage.load_active_config(cfg);
 
-    let mut serial_key_storage = [MaybeUninit::uninit(); 16];
-    let mut serial_key_q = pin!(Queue::new(&mut serial_key_storage));
-    let (serial_key_push, serial_key_pop) = serial_key_q.split();
+    //
+    // Task setup starts here-ish
+    //
 
+    // Allocate the scanner-to-serial event queue.
+    let mut scan_event_storage = [MaybeUninit::uninit(); 16];
+    let mut scan_event_q = pin!(Queue::new(&mut scan_event_storage));
+    let (scan_event_from_scanner, scan_event_to_serial) = scan_event_q.split();
+
+    // Allocate the serial-to-scanner synchronous config handoff.
     let mut config_handoff = Handoff::new();
     let (config_to_scanner, config_from_serial) = config_handoff.split();
 
@@ -157,7 +163,7 @@ fn main() -> ! {
         &p.GPIOA,
         &cfg.keymap,
         setup_mode,
-        serial_key_pop,
+        scan_event_to_serial,
         config_to_scanner,
         storage,
     ));
@@ -166,7 +172,7 @@ fn main() -> ! {
         cfg.scanner,
         config_from_serial,
         &p.GPIOA,
-        serial_key_push,
+        scan_event_from_scanner,
     ));
 
     // Set up and run the scheduler.
