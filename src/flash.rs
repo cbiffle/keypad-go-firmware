@@ -24,7 +24,7 @@
 
 use core::ptr::addr_of_mut;
 
-use crate::{device, keypad};
+use crate::{device, scanner};
 
 fn unlock(flash: &device::FLASH) {
     // Perform the flash controller unlock dance, as specified by RM 3.3.6
@@ -131,14 +131,14 @@ unsafe fn program_block(flash: &device::FLASH, address: *mut u64, source: &[u64]
 
 #[derive(Debug)]
 pub struct SystemConfig {
-    pub keypad: keypad::Config,
+    pub scanner: scanner::Config,
     pub keymap: [[u8; 8]; 8],
 }
 
 impl Default for SystemConfig {
     fn default() -> Self {
         Self {
-            keypad: keypad::Config::default(),
+            scanner: scanner::Config::default(),
             keymap: [[0; 8]; 8],
         }
     }
@@ -174,8 +174,8 @@ impl Storage {
                 core::ptr::read_volatile(base.add(1)),
             )
         };
-        out.keypad.driven_lines = header as u8;
-        out.keypad.ghost_mask = mask.to_le_bytes();
+        out.scanner.driven_lines = header as u8;
+        out.scanner.ghost_mask = mask.to_le_bytes();
 
         for (i, chunk) in out.keymap.iter_mut().enumerate() {
             let map_word = unsafe {
@@ -235,7 +235,7 @@ impl Storage {
         debug_assert!(page_offset & 0x7FF == 0);
         let page_index = u8::try_from(page_offset >> 11).unwrap();
         let header = 0xCEEBAD01_0000_0000
-            | u64::from(src.keypad.driven_lines)
+            | u64::from(src.scanner.driven_lines)
             | u64::from(serial) << 8;
 
         unlock(&self.flash);
@@ -244,7 +244,7 @@ impl Storage {
         enable_programming(&self.flash);
         unsafe {
             program(&self.flash, base, header);
-            program(&self.flash, base.add(1), u64::from_le_bytes(src.keypad.ghost_mask));
+            program(&self.flash, base.add(1), u64::from_le_bytes(src.scanner.ghost_mask));
         }
         for (i, chunk) in src.keymap.iter().enumerate() {
             let word = u64::from_le_bytes(*chunk);
