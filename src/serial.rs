@@ -13,7 +13,7 @@ use core::slice::from_ref;
 use futures::{Future, select_biased, FutureExt};
 use lilos::{exec::Notify, handoff, time::{TickTime, Millis}};
 
-use crate::{device::{self, interrupt}, keypad::{KeyState, self}, flash::{Storage, SystemConfig}};
+use crate::{device::{self, interrupt}, scanner::{KeyState, self}, flash::{Storage, SystemConfig}};
 
 pub type Uart = device::USART1;
 
@@ -22,8 +22,8 @@ pub async fn task(
     gpioa: &device::GPIOA,
     keymap: &[[u8; 8]; 8],
     setup_mode: bool,
-    mut from_scanner: lilos::spsc::Pop<'_, keypad::KeyEvent>,
-    config_to_scanner: handoff::Push<'_, keypad::Config>,
+    mut from_scanner: lilos::spsc::Pop<'_, scanner::KeyEvent>,
+    config_to_scanner: handoff::Push<'_, scanner::Config>,
     storage: Storage,
 ) -> Infallible {
     init(gpioa, uart);
@@ -49,12 +49,12 @@ const ESC: u8 = 0x1B;
 
 pub async fn setup(
     uart: &Uart,
-    mut config_to_scanner: handoff::Push<'_, keypad::Config>,
-    mut from_scanner: lilos::spsc::Pop<'_, keypad::KeyEvent>,
+    mut config_to_scanner: handoff::Push<'_, scanner::Config>,
+    mut from_scanner: lilos::spsc::Pop<'_, scanner::KeyEvent>,
     mut storage: Storage,
 ) -> Infallible {
     const SETUP_EPOCH: u8 = 0x55;
-    config_to_scanner.push(keypad::Config {
+    config_to_scanner.push(scanner::Config {
         // Recognizable epoch in case we raced the scan
         epoch: SETUP_EPOCH,
         // All lines should be driven during setup.
@@ -201,7 +201,7 @@ pub async fn setup(
     }
 
     let cfg = SystemConfig {
-        keypad: keypad::Config {
+        scanner: scanner::Config {
             epoch: DEMO_EPOCH,
             driven_lines,
             ghost_mask,
@@ -224,7 +224,7 @@ pub async fn setup(
     }
 
     const DEMO_EPOCH: u8 = 1;
-    config_to_scanner.push(keypad::Config {
+    config_to_scanner.push(scanner::Config {
         epoch: DEMO_EPOCH,
         driven_lines,
         ghost_mask,

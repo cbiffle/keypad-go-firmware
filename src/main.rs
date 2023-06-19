@@ -8,7 +8,7 @@ extern crate panic_halt;
 extern crate panic_semihosting;
 
 mod serial;
-mod keypad;
+mod scanner;
 mod flash;
 
 use core::pin::pin;
@@ -148,8 +148,8 @@ fn main() -> ! {
         storage,
     ));
 
-    let keypad_task = pin!(keypad::task(
-        cfg.keypad,
+    let scanner_task = pin!(scanner::task(
+        cfg.scanner,
         config_from_serial,
         &p.GPIOA,
         serial_key_push,
@@ -160,7 +160,7 @@ fn main() -> ! {
     lilos::exec::run_tasks(
         &mut [
             serial_task,
-            keypad_task,
+            scanner_task,
         ],
         lilos::exec::ALL_TASKS,
     )
