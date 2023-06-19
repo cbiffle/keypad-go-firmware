@@ -44,7 +44,7 @@ fn main() -> ! {
     // is about 1.25 ms, is somewhat arbitrary.
     cortex_m::asm::delay(20_000);
     // Read mode sense pins.
-    let (update_mode, setup_mode) = {
+    let (update_mode, mut setup_mode) = {
         let idr = p.GPIOC.idr.read();
         (idr.idr14().bit_is_clear(), idr.idr15().bit_is_clear())
     };
@@ -129,7 +129,7 @@ fn main() -> ! {
         let cfg = unsafe { &mut ACTIVE_CONFIG };
         cfg.write(SystemConfig::default())
     };
-    storage.load_active_config(cfg);
+    setup_mode |= !storage.load_active_config(cfg);
 
     let mut serial_key_storage = [MaybeUninit::uninit(); 16];
     let mut serial_key_q = pin!(Queue::new(&mut serial_key_storage));
