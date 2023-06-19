@@ -54,16 +54,12 @@
 //! - Fancy keypad with diodes: 56 keys.
 
 use core::convert::Infallible;
-use core::sync::atomic::{AtomicUsize, Ordering};
 
 use lilos::exec::PeriodicGate;
 use lilos::{handoff, spsc};
 use lilos::time::{TickTime, Millis};
 
 use crate::device;
-
-#[used]
-static STATE: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Copy, Clone, Debug)]
 pub struct Config {
@@ -122,12 +118,10 @@ pub async fn task(
     let mut debouncers = [[Debounce::default(); 8]; 8];
     let mut scan_gate = PeriodicGate::from(Millis(1));
     loop {
-        STATE.store(1, Ordering::SeqCst);
         scan_gate.next_time().await;
 
         // Process any config update before starting the scan.
         if let Some(new_config) = config_update.try_pop() {
-            STATE.store(6, Ordering::SeqCst);
             // Handle any "killed" drive lines. This occurs when the
             // `driven_lines` bit was 1 in the old config, and is becoming 0.
             for line in 0..8 {
@@ -154,9 +148,7 @@ pub async fn task(
         // Config doesn't get modified anywhere else in this loop -- see:
         let config = &config;
 
-        STATE.store(2, Ordering::SeqCst);
         let down_mask = scan(config, gpio).await;
-        STATE.store(3, Ordering::SeqCst);
 
         for line in 0..8 {
             for col in 0..8 {
@@ -288,10 +280,7 @@ async fn scan(config: &Config, gpio: &device::GPIOA) -> u64 {
         });
 
         // Sleep a bit to allow charge to move around. (CANCEL POINT)
-        //lilos::exec::yield_cpu().await;
-        STATE.store(4, Ordering::SeqCst);
-        lilos::exec::sleep_for(Millis(2)).await;
-        STATE.store(5, Ordering::SeqCst);
+        lilos::exec::yield_cpu().await;
 
         // Collect return states. Inactive lines will be pulled up by their
         // resistors, active columns will be pulled down by the driven pin. So
