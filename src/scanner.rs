@@ -54,7 +54,9 @@
 //! - Fancy keypad with diodes: 56 keys.
 
 use core::convert::Infallible;
+use core::sync::atomic::{Ordering, AtomicBool};
 
+use lilos::atomic::AtomicExt;
 use lilos::exec::PeriodicGate;
 use lilos::{handoff, spsc};
 use lilos::time::{TickTime, Millis};
@@ -115,7 +117,7 @@ pub async fn task(
 ) -> Infallible {
     configure_pins(gpio);
 
-    let mut debouncers = [[Debounce::default(); 8]; 8];
+    let debouncers = take_debouncers();
     let mut scan_gate = PeriodicGate::from(Millis(1));
     loop {
         scan_gate.next_time().await;
@@ -165,6 +167,18 @@ pub async fn task(
         }
 
     }
+}
+
+fn take_debouncers() -> &'static mut [[Debounce; 8]; 8] {
+    static DEBOUNCERS_TAKEN: AtomicBool = AtomicBool::new(false);
+    if DEBOUNCERS_TAKEN.swap_polyfill(true, Ordering::SeqCst) {
+        panic!();
+    }
+    static mut DEBOUNCERS: [[Debounce; 8]; 8] = [[Debounce::DEFAULT; 8]; 8];
+    // Safety: we can safely get an exclusive reference to this static because
+    // (1) it's scoped to this function and (2) the code above ensures that we
+    // only get to this point in the function once.
+    unsafe { &mut DEBOUNCERS }
 }
 
 fn configure_pins(gpio: &device::GPIOA) {
@@ -218,6 +232,11 @@ struct Debounce {
 
 impl Debounce {
     const PERIOD: Millis = Millis(5);
+    const DEFAULT: Self = Self {
+        stable_state: KeyState::Up,
+        last_change: None,
+    };
+
     pub fn step(&mut self, input_state: KeyState) -> Option<KeyState> {
         if input_state == self.stable_state {
             // No longer tracking a change.
