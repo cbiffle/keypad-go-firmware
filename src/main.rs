@@ -27,9 +27,18 @@ fn main() -> ! {
     let mut cp = unsafe { cortex_m::Peripherals::steal() };
     let p = unsafe { device::Peripherals::steal() };
 
-    // Before doing ANYTHING ELSE we're going to do enough setup to check for
-    // the update button being held. We're currently at 16 MHz.
-    p.RCC.iopenr.write(|w| w.iopcen().set_bit());
+    // We are currently at 16 MHz on HSI.
+
+    // Turn on the I/O ports we use. If we wind up jumping to the bootloader
+    // instead, we'll reverse this.
+    p.RCC.iopenr.write(|w| {
+        w.iopaen().set_bit();
+        w.iopben().set_bit();
+        w.iopcen().set_bit();
+        w
+    });
+
+    // Switch the two control buttons to pulled-up inputs.
     p.GPIOC.pupdr.write(|w| {
         w.pupdr14().pull_up(); // Update button
         w.pupdr15().pull_up(); // Setup button
@@ -49,25 +58,29 @@ fn main() -> ! {
         (idr.idr14().bit_is_clear(), idr.idr15().bit_is_clear())
     };
 
+    // Go ahead and reset port C. We need to do it before jumping into the
+    // bootloader, and we ought to do it before starting the rest of our work,
+    // so, why not do it here?
+    p.GPIOC.moder.reset();
+    p.GPIOC.pupdr.reset();
+
     // Handle update request.
     if update_mode {
         do_update(cp, p);
     }
 
-    // Now we can mess around with machine state to our heart's content.
+    // Now we can mess around with machine state to our heart's content, since
+    // we won't need to precisely reverse the changes!
+    //
+    // Let's go faster.
     clock_setup(&p);
+    const CLOCK_HZ: u32 = 48_000_000;
 
-    // For compactness, we're going to turn on all our clocks, reset all our
-    // peripherals, and set all our pin functions right here in main.
-    p.RCC.iopenr.write(|w| {
-        w.iopaen().set_bit();
-        w.iopben().set_bit();
-        // port C is already on above) but because we're using write instead of
-        // modify to save space, we need to repeat it here.
-        w.iopcen().set_bit();
-        // other ports aren't pinned out, leave off.
-        w
-    });
+    // For compactness (in flash) we're going to turn on the peripherals we use
+    // here, in one block, instead of in each driver.
+    //
+    // This decision may turn out to be silly, given how much flash async fns
+    // burn.
     p.RCC.apbenr2.write(|w| {
         w.usart1en().set_bit();
         w.syscfgen().set_bit();
@@ -105,8 +118,11 @@ fn main() -> ! {
     p.GPIOA.afrh.write(|w| {
         w.afsel9().af1(); // USART1_TX
         w.afsel10().af1(); // USART1_RX
-        // This will also write A13/A14 to AF0, which is fortunately the correct
-        // setting to continue exposing SWD.
+
+        // Since we're using write instead of modify to save space, this will
+        // change _all pins on the port_ ... which includes the SWD pins.
+        // However, their reset default of AF0 is correct for keeping the debug
+        // port open, so, no action required.
         w
     });
 
@@ -115,10 +131,6 @@ fn main() -> ! {
         w.afsel7().af6(); // I2C1_SCL
         w
     });
-
-    // Note: GPIOC already configured above.
-
-    const CLOCK_HZ: u32 = 48_000_000;
 
     let storage = flash::Storage::new(p.FLASH);
     // Ensure that the RAM config goes somewhere I can find in a debugger!
@@ -253,10 +265,9 @@ fn clock_setup(p: &device::Peripherals) {
     }
 }
 
+/// Runs ST's program instead of ours.
 fn do_update(cp: cortex_m::Peripherals, p: device::Peripherals) -> ! {
     // Reverse the changes we made to check the button state.
-    p.GPIOC.moder.reset();
-    p.GPIOC.pupdr.reset();
     p.RCC.iopenr.reset();
 
     // Configure to run the ROM. It appears that the ROM does not require itself
