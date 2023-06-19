@@ -22,7 +22,9 @@
 //! Currently there's no CRC or anything. We're attempting to catch failed
 //! partial writes and erased sectors, not corruption. That's what ECC is for.
 
-use core::ptr::addr_of_mut;
+use core::{ptr::addr_of_mut, sync::atomic::{AtomicBool, Ordering}};
+
+use lilos::atomic::AtomicExt;
 
 use crate::{device, scanner};
 
@@ -141,10 +143,27 @@ pub struct Storage {
 
 impl Storage {
     pub fn new(flash: device::FLASH) -> Self {
+        static STORAGE_TAKEN: AtomicBool = AtomicBool::new(false);
+        if STORAGE_TAKEN.swap_polyfill(true, Ordering::SeqCst) {
+            panic!()
+        }
+
+        extern "C" {
+            static mut STORAGE_PAGE_A: [u64; 256];
+            static mut STORAGE_PAGE_B: [u64; 256];
+        }
+
         Self {
             flash,
             pages: [
+                // Safety: the code above ensures we only get to this point
+                // once, so the &mut won't alias; we happen to know that these
+                // extern "C" variables are not being modified outside of Rust,
+                // so the meaning of &mut won't be violated. Finally, we don't
+                // actually use these as &mut ever, so all this is a little bit
+                // overkill, probably.
                 unsafe { addr_of_mut!(STORAGE_PAGE_A) },
+                // Safety: same as line above.
                 unsafe { addr_of_mut!(STORAGE_PAGE_B) },
             ],
         }
@@ -250,7 +269,3 @@ impl Storage {
     }
 }
 
-extern "C" {
-    static mut STORAGE_PAGE_A: [u64; 256];
-    static mut STORAGE_PAGE_B: [u64; 256];
-}
