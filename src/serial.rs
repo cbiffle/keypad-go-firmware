@@ -62,13 +62,13 @@ pub async fn setup(
         // No ghost keys should be ignored.
         ghost_mask: [0; 8],
     }).await;
-    transmit(uart, b"\r\n\r\nSETUP MODE\r\n").await;
+    transmit(uart, b"\r\n\r\nSETUP MODE\r\n\r\n").await;
 
     let mut keys = [[0; 8]; 8];
     'learnloop:
     loop {
         transmit(uart,
-          b"Press+hold any button on keypad.\r\n\
+          b"Press+hold any keypad button.\r\n\
           Type ESC here if no more.\r\n").await;
         let mut connectivity = [0u8; 8];
         let evt = loop {
@@ -134,10 +134,10 @@ pub async fn setup(
         let first_path = first_path.unwrap();
         let known = keys[first_path.0][first_path.1] != 0;
         if known {
-            transmit(uart, b"Already configured.\r\n\
+            transmit(uart, b"\r\nAlready configured.\r\n\
                 To reconfigure, hit RESET.\r\n").await;
         }
-        transmit(uart, b"Please release button.\r\n").await;
+        transmit(uart, b"\r\nPlease release button.\r\n").await;
 
         while connectivity != [0; 8] {
             let evt = from_scanner.pop().await;
@@ -149,23 +149,19 @@ pub async fn setup(
         if known { continue; }
 
         drain(uart);
-        transmit(uart, b"Type the key's character here:").await;
+        transmit(uart, b"\r\nType the key's character here: ").await;
         let entered_char = loop {
             match recv(uart).await {
                 Err(_) => continue,
                 Ok(x) => if x != 0 { break x },
             }
         };
-        transmit_v(uart, &[
-            from_ref(&entered_char),
-            b"\r\nAssociating path ",
-            from_ref(&pin_digit(first_path.0 as u8)),
-            b" -> ",
-            from_ref(&pin_digit(first_path.1 as u8)),
-            b" with that character.\r\n",
-        ]).await;
 
         keys[first_path.0][first_path.1] = entered_char;
+        transmit_v(uart, &[
+            from_ref(&entered_char),
+            b"\r\nOK\r\n\r\n",
+        ]).await;
     }
 
     transmit(uart, b"Mapping:\r\n").await;
@@ -177,7 +173,7 @@ pub async fn setup(
             // where at least one assigned key exists.
             driven_lines |= 1 << p;
             transmit_v(uart, &[
-                b"driving pin ",
+                b"drive ",
                 from_ref(&pin_digit(p)),
                 b"\r\n",
             ]).await;
@@ -189,11 +185,11 @@ pub async fn setup(
                     ghost_mask[usize::from(p)] &= !(1 << col);
 
                     transmit_v(uart, &[
-                        b" - sensing pin ",
+                        b" - sense ",
                         from_ref(&pin_digit(col)),
-                        b" sends byte: ",
+                        b" => '",
                         from_ref(&k),
-                        b"\r\n",
+                        b"'\r\n",
                     ]).await;
                 }
             }
@@ -208,7 +204,7 @@ pub async fn setup(
         },
         keymap: keys,
     };
-    transmit(uart, b"Save this config? Y/N\r\n").await;
+    transmit(uart, b"\r\nSave? Y/N\r\n").await;
     loop {
         match recv(uart).await {
             Ok(b'y') | Ok(b'Y') => {
@@ -230,7 +226,7 @@ pub async fn setup(
         ghost_mask,
     }).await;
 
-    transmit(uart, b"Running demo mode until reset.\r\n").await;
+    transmit(uart, b"Running demo until reset:\r\n").await;
 
     loop {
         let evt = from_scanner.pop().await;
