@@ -127,12 +127,16 @@ pub struct SystemConfig {
     pub keymap: [[u8; 8]; 8],
 }
 
+impl SystemConfig {
+    pub const DEFAULT: Self = Self {
+        scanner: scanner::Config::DEFAULT,
+        keymap: [[0; 8]; 8],
+    };
+}
+
 impl Default for SystemConfig {
     fn default() -> Self {
-        Self {
-            scanner: scanner::Config::default(),
-            keymap: [[0; 8]; 8],
-        }
+        Self::DEFAULT
     }
 }
 

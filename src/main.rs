@@ -135,12 +135,14 @@ fn main() -> ! {
     let storage = flash::Storage::new(p.FLASH);
     // Ensure that the RAM config goes somewhere I can find in a debugger!
     let cfg = {
-        static mut ACTIVE_CONFIG: MaybeUninit<SystemConfig> = MaybeUninit::uninit();
+        static mut ACTIVE_CONFIG: SystemConfig = SystemConfig::DEFAULT;
         // Safety: we're relying on the fact that this is in main to ensure that
-        // it only gets executed once.
-        let cfg = unsafe { &mut ACTIVE_CONFIG };
-        cfg.write(SystemConfig::default())
+        // it only gets executed once. That is not a spectacularly robust
+        // approach to this, but it has the advantage of being essentially free.
+        unsafe { &mut ACTIVE_CONFIG }
     };
+    // Attempt to override the default config with what we find in flash. If we
+    // find nothing in flash, force `setup_mode` to true.
     setup_mode |= !storage.load_active_config(cfg);
 
     let mut serial_key_storage = [MaybeUninit::uninit(); 16];
