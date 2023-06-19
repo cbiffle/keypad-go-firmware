@@ -224,6 +224,11 @@ impl Storage {
             Some(result) => result,
             None => (0, 0xFF),
         };
+        // Flip to other page.
+        let i = i ^ 1;
+        // Advance the serial.
+        let serial = serial.wrapping_add(1);
+
         let base = self.pages[i] as *mut u64;
         let page_offset = (base as u32).wrapping_sub(0x08000000);
         debug_assert!(page_offset >= 28 * 1024 && page_offset < 32 * 1024);
@@ -231,7 +236,7 @@ impl Storage {
         let page_index = u8::try_from(page_offset >> 11).unwrap();
         let header = 0xCEEBAD01_0000_0000
             | u64::from(src.keypad.driven_lines)
-            | u64::from(serial.wrapping_add(1)) << 8;
+            | u64::from(serial) << 8;
 
         unlock(&self.flash);
 
