@@ -116,7 +116,7 @@ impl KeyEvent {
         self.coord & 0x7
     }
     pub fn sensed_line(&self) -> u8 {
-        self.coord >> 3
+        (self.coord >> 3) & 0x7
     }
 }
 
@@ -185,11 +185,13 @@ fn take_debouncers() -> &'static mut [[Debounce; 8]; 8] {
     if DEBOUNCERS_TAKEN.swap_polyfill(true, Ordering::SeqCst) {
         panic!();
     }
-    static mut DEBOUNCERS: [[Debounce; 8]; 8] = [[Debounce::DEFAULT; 8]; 8];
-    // Safety: we can safely get an exclusive reference to this static because
-    // (1) it's scoped to this function and (2) the code above ensures that we
-    // only get to this point in the function once.
-    unsafe { &mut DEBOUNCERS }
+    {
+        static mut DEBOUNCERS: [[Debounce; 8]; 8] = [[Debounce::DEFAULT; 8]; 8];
+        // Safety: we can safely get an exclusive reference to this static
+        // because (1) it's scoped to this function and (2) the code above
+        // ensures that we only get to this point in the function once.
+        unsafe { &mut DEBOUNCERS }
+    }
 }
 
 fn configure_pins(gpio: &device::GPIOA) {

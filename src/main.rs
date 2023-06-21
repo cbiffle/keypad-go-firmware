@@ -131,6 +131,11 @@ fn main() -> ! {
         w.afsel7().af6(); // I2C1_SCL
         w
     });
+    // Use PB3 as profiling output. TODO: this interferes with I2C.
+    p.GPIOB.moder.modify(|_, w| {
+        w.moder3().output();
+        w
+    });
 
     let storage = flash::Storage::new(p.FLASH);
     // Ensure that the RAM config goes somewhere I can find in a debugger!
@@ -177,12 +182,17 @@ fn main() -> ! {
 
     // Set up and run the scheduler.
     lilos::time::initialize_sys_tick(&mut cp.SYST, CLOCK_HZ);
-    lilos::exec::run_tasks(
+    lilos::exec::run_tasks_with_idle(
         &mut [
             serial_task,
             scanner_task,
         ],
         lilos::exec::ALL_TASKS,
+        || {
+            p.GPIOB.bsrr.write(|w| w.br3().set_bit());
+            cortex_m::asm::wfi();
+            p.GPIOB.bsrr.write(|w| w.bs3().set_bit());
+        },
     )
 }
 
