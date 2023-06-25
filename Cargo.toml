@@ -22,9 +22,7 @@ enum-map = "2.5.0"
 scopeguard = { version = "1.1.0", default-features = false }
 
 [dependencies.lilos]
-version = "0.3.0-rc.4"
-#git = "https://github.com/cbiffle/lilos"
-path = "../../../lilos/os"
+version = "0.3.0"
 default-features = false
 features = ["spsc", "systick", "mutex", "handoff"]
 

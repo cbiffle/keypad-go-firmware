@@ -254,7 +254,9 @@ dependencies = [
 
 [[package]]
 name = "lilos"
-version = "0.3.0-rc.4"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec87ccf7956a7a3e0a6bacefd91f950e590a0684d1d5fd9096e0e2f5bd5a0611"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
