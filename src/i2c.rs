@@ -6,6 +6,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use futures::{select_biased, FutureExt};
 use lilos::atomic::AtomicArithExt;
 use lilos::exec::Notify;
+use lilos::spsc;
 use scopeguard::ScopeGuard;
 
 use crate::device;
@@ -81,6 +82,7 @@ pub async fn task(
     rcc: &device::RCC,
     gpiob: &device::GPIOB,
     i2c: device::I2C1,
+    mut bytes_from_serial: spsc::Pop<'_, u8>,
 ) -> Infallible {
     init(rcc, &i2c, gpiob);
 
@@ -127,16 +129,19 @@ pub async fn task(
                     }
                 }
             }
-            never = handle_data(&i2c).fuse() => match never {}
+            never = handle_data(&i2c, &mut bytes_from_serial).fuse() => match never {}
         }
     }
 }
 
-async fn handle_data(i2c: &device::I2C1) -> ! {
+async fn handle_data(
+    i2c: &device::I2C1,
+    bytes_from_serial: &mut spsc::Pop<'_, u8>,
+) -> ! {
     // Determine the direction of the transfer.
     match i2c.isr.read().dir().variant() {
         device::i2c1::isr::DIR_A::Write => receive_data(i2c).await,
-        device::i2c1::isr::DIR_A::Read => transmit_data(i2c).await,
+        device::i2c1::isr::DIR_A::Read => transmit_data(i2c, bytes_from_serial).await,
     }
 }
 
@@ -197,7 +202,10 @@ async fn receive_data(i2c: &device::I2C1) -> ! {
 /// us. So, we have to generate data forever if they ask us to. In this
 /// direction we can't even NACK to express our displeasure. Instead, any
 /// outgoing data transfer needs to naturally pad itself with ... something.
-async fn transmit_data(i2c: &device::I2C1) -> ! {
+async fn transmit_data(
+    i2c: &device::I2C1,
+    bytes_from_serial: &mut spsc::Pop<'_, u8>,
+) -> ! {
 //    i2c.cr2.modify(|_, w| {
 //        // We're going to move one byte.
 //        w.nbytes().bits(1);
@@ -222,7 +230,8 @@ async fn transmit_data(i2c: &device::I2C1) -> ! {
         ScopeGuard::into_inner(txguard);
 
         // Send the next byte.
-        i2c.txdr.write(|w| w.txdata().bits(0xAA));
+        let byte = bytes_from_serial.try_pop().unwrap_or(0);
+        i2c.txdr.write(|w| w.txdata().bits(byte));
         TXS.fetch_add_polyfill(1, Ordering::Relaxed);
 
         // Wait for TCR event.

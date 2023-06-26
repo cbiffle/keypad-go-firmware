@@ -164,6 +164,11 @@ fn main() -> ! {
     let mut config_handoff = Handoff::new();
     let (config_to_scanner, config_from_serial) = config_handoff.split();
 
+    // Allocate the serial-to-I2C byte queue.
+    let mut i2c_byte_storage = [MaybeUninit::uninit(); 16];
+    let mut i2c_byte_q = pin!(Queue::new(&mut i2c_byte_storage));
+    let (i2c_byte_from_serial, i2c_byte_to_i2c) = i2c_byte_q.split();
+
     let serial_task = pin!(serial::task(
         &p.USART1,
         &p.GPIOA,
@@ -171,6 +176,7 @@ fn main() -> ! {
         setup_mode,
         scan_event_to_serial,
         config_to_scanner,
+        i2c_byte_from_serial,
         storage,
     ));
 
@@ -185,6 +191,7 @@ fn main() -> ! {
         &p.RCC,
         &p.GPIOB,
         p.I2C1,
+        i2c_byte_to_i2c,
     ));
 
     // Set up and run the scheduler.
