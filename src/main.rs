@@ -131,9 +131,9 @@ fn main() -> ! {
         w.afsel7().af6(); // I2C1_SCL
         w
     });
-    // Use PB3 as profiling output. TODO: this interferes with I2C.
-    p.GPIOB.moder.modify(|_, w| {
-        w.moder3().output();
+    // Use PA8 as profiling output.
+    p.GPIOA.moder.modify(|_, w| {
+        w.moder8().output();
         w
     });
 
@@ -189,9 +189,9 @@ fn main() -> ! {
         ],
         lilos::exec::ALL_TASKS,
         || {
-            p.GPIOB.bsrr.write(|w| w.br3().set_bit());
+            p.GPIOA.bsrr.write(|w| w.br8().set_bit());
             cortex_m::asm::wfi();
-            p.GPIOB.bsrr.write(|w| w.bs3().set_bit());
+            p.GPIOA.bsrr.write(|w| w.bs8().set_bit());
         },
     )
 }
