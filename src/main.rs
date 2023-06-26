@@ -10,6 +10,7 @@ extern crate panic_semihosting;
 mod serial;
 mod scanner;
 mod flash;
+mod i2c;
 
 use core::pin::pin;
 
@@ -180,12 +181,19 @@ fn main() -> ! {
         scan_event_from_scanner,
     ));
 
+    let i2c_task = pin!(i2c::task(
+        &p.RCC,
+        &p.GPIOB,
+        p.I2C1,
+    ));
+
     // Set up and run the scheduler.
     lilos::time::initialize_sys_tick(&mut cp.SYST, CLOCK_HZ);
     lilos::exec::run_tasks_with_idle(
         &mut [
             serial_task,
             scanner_task,
+            i2c_task,
         ],
         lilos::exec::ALL_TASKS,
         || {
