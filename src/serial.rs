@@ -11,7 +11,7 @@ use core::convert::Infallible;
 use core::slice::from_ref;
 
 use futures::{Future, select_biased, FutureExt};
-use lilos::{exec::Notify, handoff, time::{TickTime, Millis}};
+use lilos::{exec::Notify, handoff, spsc, time::{TickTime, Millis}};
 
 use crate::{device::{self, interrupt}, scanner::{KeyState, self}, flash::{Storage, SystemConfig}};
 
@@ -22,8 +22,9 @@ pub async fn task(
     gpioa: &device::GPIOA,
     keymap: &[[u8; 8]; 8],
     setup_mode: bool,
-    mut from_scanner: lilos::spsc::Pop<'_, scanner::KeyEvent>,
+    mut from_scanner: spsc::Pop<'_, scanner::KeyEvent>,
     config_to_scanner: handoff::Push<'_, scanner::Config>,
+    mut bytes_to_i2c: spsc::Push<'_, u8>,
     storage: Storage,
 ) -> Infallible {
     init(gpioa, uart);
@@ -38,6 +39,10 @@ pub async fn task(
                 KeyState::Down => byte,
                 KeyState::Up => byte | 0x80,
             };
+            // Stuff the byte into the I2C key event queue best-effort. If the
+            // bus initiator fails to keep up, we lose keys. So be it.
+            bytes_to_i2c.try_push(byte).ok();
+
             transmit_byte(uart, &byte).await;
         }
     }
