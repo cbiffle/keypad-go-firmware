@@ -205,9 +205,9 @@ fn main() -> ! {
         ],
         lilos::exec::ALL_TASKS,
         || {
-            p.GPIOA.bsrr.write(|w| w.br8().set_bit());
+            //p.GPIOA.bsrr.write(|w| w.br8().set_bit());
             cortex_m::asm::wfi();
-            p.GPIOA.bsrr.write(|w| w.bs8().set_bit());
+            //p.GPIOA.bsrr.write(|w| w.bs8().set_bit());
         },
     )
 }
