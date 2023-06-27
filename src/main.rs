@@ -14,6 +14,7 @@ mod i2c;
 
 use core::pin::pin;
 
+use cortex_m_rt::pre_init;
 use enum_map::MaybeUninit;
 use lilos::handoff::Handoff;
 use stm32g0 as _;
@@ -337,4 +338,36 @@ fn do_update(cp: cortex_m::Peripherals, p: device::Peripherals) -> ! {
             options(nostack, noreturn)
         )
     }
+}
+
+// Using a pre-init hook here to fill the stack with a recognizable bit pattern,
+// to help my fledgling debugger.
+#[pre_init]
+unsafe fn pre_init() {
+    core::arch::asm!("
+        @ Linker script marks end of BSS+uninit with __sheap
+        ldr r0, =__sheap
+        @ We'll work down from the current stack pointer,
+        @ _exclusive,_ to avoid corrupting startup state.
+        mov r1, sp
+        ldr r2, =0xDEDEDEDE
+
+        @ Bump working pointer down
+    0:  subs r1, #4
+        @ Compare to BSS+uninit end
+        cmp r0, r1
+        @ Exit if we've passed it
+        bhi 1f
+        @ Initialize word
+        str r2, [r1]
+        b 0b
+    1:
+        ",
+        // "readonly" in that we don't write any memory visible to Rust.
+        // Could almost set "nostack" here, but it technically requires that we
+        // not write to the stack redzone. Our architecture does not have a
+        // stack redzone, but if it did, we'd be writing over it in this
+        // routine.
+        options(readonly),
+    );
 }
