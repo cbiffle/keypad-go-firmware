@@ -56,6 +56,7 @@
 use core::convert::Infallible;
 use core::sync::atomic::{Ordering, AtomicBool};
 
+use device::gpio::vals::{Ot, Pupdr, Moder};
 use lilos::atomic::AtomicExt;
 use lilos::exec::PeriodicGate;
 use lilos::{handoff, spsc};
@@ -123,7 +124,7 @@ impl KeyEvent {
 pub async fn task(
     mut config: Config,
     mut config_update: handoff::Pop<'_, Config>,
-    gpio: &device::GPIOA,
+    gpio: &device::gpio::Gpio,
     mut out_queue: spsc::Push<'_, KeyEvent>,
 ) -> Infallible {
     configure_pins(gpio);
@@ -194,46 +195,28 @@ fn take_debouncers() -> &'static mut [[Debounce; 8]; 8] {
     }
 }
 
-fn configure_pins(gpio: &device::GPIOA) {
+fn configure_pins(gpio: &device::gpio::Gpio) {
     // Ensure all scan pins are open drain (only drive low)
-    gpio.otyper.modify(|_, w| {
-        w.ot0().open_drain();
-        w.ot1().open_drain();
-        w.ot2().open_drain();
-        w.ot3().open_drain();
-        w.ot4().open_drain();
-        w.ot5().open_drain();
-        w.ot6().open_drain();
-        w.ot7().open_drain();
-        w
+    gpio.otyper().modify(|w| {
+        for pin in 0..=7 {
+            w.set_ot(pin, Ot::OPENDRAIN);
+        }
     });
-    gpio.pupdr.modify(|_, w| {
-        w.pupdr0().pull_up();
-        w.pupdr1().pull_up();
-        w.pupdr2().pull_up();
-        w.pupdr3().pull_up();
-        w.pupdr4().pull_up();
-        w.pupdr5().pull_up();
-        w.pupdr6().pull_up();
-        w.pupdr7().pull_up();
-        w
+    gpio.pupdr().modify(|w| {
+        for pin in 0..=7 {
+            w.set_pupdr(pin, Pupdr::PULLUP);
+        }
     });
 
     // Ensure all scan pins are initially driven high (i.e. not driven)
-    gpio.odr.modify(|r, w| unsafe { w.bits(r.bits() | 0xFF) });
+    gpio.odr().modify(|w| w.0 |= 0xFF);
 
     // Switch pins to outputs. Note that this also enables the schmitt trigger
     // input, which is important for reading scan results.
-    gpio.moder.modify(|_, w| {
-        w.moder0().output();
-        w.moder1().output();
-        w.moder2().output();
-        w.moder3().output();
-        w.moder4().output();
-        w.moder5().output();
-        w.moder6().output();
-        w.moder7().output();
-        w
+    gpio.moder().modify(|w| {
+        for pin in 0..=7 {
+            w.set_moder(pin, Moder::OUTPUT);
+        }
     });
 }
 
@@ -291,7 +274,7 @@ pub enum KeyState { #[default] Up, Down }
 /// This is cancel-safe in the strict sense: if the scan is canceled, all row
 /// pins are returned to idle state (weak pull up) to ensure the _next_ scan can
 /// work.
-async fn scan(config: &Config, gpio: &device::GPIOA) -> u64 {
+async fn scan(config: &Config, gpio: &device::gpio::Gpio) -> u64 {
     let mut down_mask = 0;
 
     for line in 0..8 {
@@ -300,15 +283,15 @@ async fn scan(config: &Config, gpio: &device::GPIOA) -> u64 {
             continue;
         }
         // Drive the line low.
-        gpio.bsrr.write(|w| unsafe {
+        gpio.bsrr().write(|w| {
             // Set the corresponding RESET bit to pull the pin low.
-            w.bits(u32::from(line_mask) << 16)
+            w.0 = u32::from(line_mask) << 16;
         });
         // Make sure this pin gets released if we're canceled in the yield
         // below.
         let pin_guard = scopeguard::guard((), |_| {
             // Release the row line by setting the corresponding SET bit.
-            gpio.bsrr.write(|w| unsafe { w.bits(u32::from(line_mask)) });
+            gpio.bsrr().write(|w| w.0 = u32::from(line_mask));
         });
 
         // Sleep a bit to allow charge to move around. (CANCEL POINT)
@@ -317,7 +300,7 @@ async fn scan(config: &Config, gpio: &device::GPIOA) -> u64 {
         // Collect return states. Inactive lines will be pulled up by their
         // resistors, active columns will be pulled down by the driven pin. So
         // we invert here.
-        let return_states = gpio.idr.read().bits() as u8 ^ 0xFF;
+        let return_states = gpio.idr().read().0 as u8 ^ 0xFF;
         // Discharge the guard so we release the pin and the matrix can
         // start returning to idle charge.
         drop(pin_guard);
