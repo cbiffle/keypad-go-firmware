@@ -15,67 +15,66 @@ mod i2c;
 use core::pin::pin;
 
 use cortex_m_rt::pre_init;
+use device::{gpio::vals::{Pupdr, Moder, Idr}, rcc::{regs::Gpioenr, vals::{Pllsrc, Sw}}, flash::vals::Latency};
 use enum_map::MaybeUninit;
 use lilos::handoff::Handoff;
-use stm32g0 as _;
-use stm32g0::stm32g030 as device;
+use stm32_metapac as device;
 use lilos::spsc::Queue;
 
 use crate::flash::SystemConfig;
 
-
 #[cortex_m_rt::entry]
 fn main() -> ! {
     let mut cp = unsafe { cortex_m::Peripherals::steal() };
-    let p = unsafe { device::Peripherals::steal() };
 
+    let rcc = device::RCC;
+    let gpioa = device::GPIOA;
+    let gpiob = device::GPIOB;
+    let gpioc = device::GPIOC;
     // We are currently at 16 MHz on HSI.
 
     // Turn on the I/O ports we use. If we wind up jumping to the bootloader
     // instead, we'll reverse this.
-    p.RCC.iopenr.write(|w| {
-        w.iopaen().set_bit();
-        w.iopben().set_bit();
-        w.iopcen().set_bit();
-        w
+    rcc.gpioenr().write(|w| {
+        w.set_gpioaen(true);
+        w.set_gpioben(true);
+        w.set_gpiocen(true);
     });
 
     // Switch the two control buttons to pulled-up inputs.
-    p.GPIOC.pupdr.write(|w| {
-        w.pupdr14().pull_up(); // Update button
-        w.pupdr15().pull_up(); // Setup button
-        w
+    gpioc.pupdr().write(|w| {
+        w.set_pupdr(14, Pupdr::PULLUP); // Update button
+        w.set_pupdr(15, Pupdr::PULLUP); // Setup button
     });
-    p.GPIOC.moder.write(|w| {
-        w.moder14().input(); // Update button
-        w.moder15().input(); // Setup button
-        w
+    gpioc.moder().write(|w| {
+        w.set_moder(14, Moder::INPUT); // Update button
+        w.set_moder(15, Moder::INPUT); // Setup button
     });
     // Delay long enough for mode sense pins to charge. TODO: this choice, which
     // is about 1.25 ms, is somewhat arbitrary.
     cortex_m::asm::delay(20_000);
     // Read mode sense pins.
     let (update_mode, mut setup_mode) = {
-        let idr = p.GPIOC.idr.read();
-        (idr.idr14().bit_is_clear(), idr.idr15().bit_is_clear())
+        let idr = gpioc.idr().read();
+        (idr.idr(14) == Idr::HIGH, idr.idr(15) == Idr::HIGH)
     };
 
     // Go ahead and reset port C. We need to do it before jumping into the
     // bootloader, and we ought to do it before starting the rest of our work,
     // so, why not do it here?
-    p.GPIOC.moder.reset();
-    p.GPIOC.pupdr.reset();
+    gpioc.moder().write_value(device::gpio::regs::Moder(0));
+    gpioc.pupdr().write_value(device::gpio::regs::Pupdr(0));
 
     // Handle update request.
     if update_mode {
-        do_update(cp, p);
+        do_update(cp, &rcc);
     }
 
     // Now we can mess around with machine state to our heart's content, since
     // we won't need to precisely reverse the changes!
     //
     // Let's go faster.
-    clock_setup(&p);
+    clock_setup();
     const CLOCK_HZ: u32 = 48_000_000;
 
     // For compactness (in flash) we're going to turn on the peripherals we use
@@ -83,10 +82,9 @@ fn main() -> ! {
     //
     // This decision may turn out to be silly, given how much flash async fns
     // burn.
-    p.RCC.apbenr2.write(|w| {
-        w.usart1en().set_bit();
-        w.syscfgen().set_bit();
-        w
+    rcc.apbenr2().write(|w| {
+        w.set_usart1en(true);
+        w.set_syscfgen(true);
     });
 
     cortex_m::asm::dsb(); // probably not necessary on M0?
@@ -110,36 +108,31 @@ fn main() -> ! {
     // to do tests first.
 
     // Expose PA9/PA10 instead of PA11/PA12.
-    p.SYSCFG.cfgr1.write(|w| {
-        // fucking PAC missed these bits somehow
-        unsafe {
-            w.bits((1 << 4) | (1 << 3))
-        }
+    device::SYSCFG.cfgr1().write(|w| {
+        // TODO metapac models these bits wrong
+        w.0 = w.0 | (1 << 4) | (1 << 3);
     });
 
-    p.GPIOA.afrh.write(|w| {
-        w.afsel9().af1(); // USART1_TX
-        w.afsel10().af1(); // USART1_RX
+    device::GPIOA.afr(1).write(|w| {
+        w.set_afr(9, 1); // USART1_TX
+        w.set_afr(10, 1); // USART1_RX
 
         // Since we're using write instead of modify to save space, this will
         // change _all pins on the port_ ... which includes the SWD pins.
-        // However, their reset default of AF0 is correct for keeping the debug
-        // port open, so, no action required.
-        w
+        // However, their default of AF0 is correct for keeping the debug port
+        // open, so, no action required.
     });
 
-    p.GPIOB.afrl.write(|w| {
-        w.afsel6().af6(); // I2C1_SDA
-        w.afsel7().af6(); // I2C1_SCL
-        w
+    device::GPIOB.afr(0).write(|w| {
+        w.set_afr(6, 6); // I2C1_SDA
+        w.set_afr(7, 6); // I2C1_SCL
     });
     // Use PA8 as profiling output.
-    p.GPIOA.moder.modify(|_, w| {
-        w.moder8().output();
-        w
+    device::GPIOA.moder().modify(|w| {
+        w.set_moder(8, Moder::OUTPUT);
     });
 
-    let storage = flash::Storage::new(p.FLASH);
+    let storage = flash::Storage::new(device::FLASH);
     // Ensure that the RAM config goes somewhere I can find in a debugger!
     let cfg = {
         static mut ACTIVE_CONFIG: SystemConfig = SystemConfig::DEFAULT;
@@ -171,8 +164,8 @@ fn main() -> ! {
     let (i2c_byte_from_serial, i2c_byte_to_i2c) = i2c_byte_q.split();
 
     let serial_task = pin!(serial::task(
-        &p.USART1,
-        &p.GPIOA,
+        &device::USART1,
+        &gpioa,
         &cfg.keymap,
         setup_mode,
         scan_event_to_serial,
@@ -184,14 +177,14 @@ fn main() -> ! {
     let scanner_task = pin!(scanner::task(
         cfg.scanner,
         config_from_serial,
-        &p.GPIOA,
+        &gpioa,
         scan_event_from_scanner,
     ));
 
     let i2c_task = pin!(i2c::task(
-        &p.RCC,
-        &p.GPIOB,
-        p.I2C1,
+        &rcc,
+        &gpiob,
+        device::I2C1,
         i2c_byte_to_i2c,
     ));
 
@@ -212,7 +205,9 @@ fn main() -> ! {
     )
 }
 
-fn clock_setup(p: &device::Peripherals) {
+fn clock_setup() {
+    let flash = device::FLASH;
+    let rcc = device::RCC;
     // We come out of reset at 16 MHz on HSI. We would like to be running at 48
     // MHz (not 64, because we'd like to simulate the limitations of the
     // STM32C0).
@@ -245,64 +240,48 @@ fn clock_setup(p: &device::Peripherals) {
     // in this register (bit 18), so DO NOT use `write` or `reset`. If you clear
     // bit 18, bad shit will happen to you -- it interferes with debugger
     // access.
-    p.FLASH.acr.modify(|_, w| {
-        unsafe {
-            w.latency().bits(1);
-        }
-        w
+    flash.acr().modify(|w| {
+        w.set_latency(Latency::WS1);
     });
 
     // Fire up the PLL.
     // First, set up our divisors.
-    p.RCC.pllsyscfgr.write(|w| {
+    rcc.pllsyscfgr().write(|w| {
         // Source input from HSI16.
-        unsafe {
-            w.pllsrc().bits(0b10);
-        }
+        w.set_pllsrc(Pllsrc::HSI16);
         // Divide input by 2 to 8 MHz.
-        unsafe {
-            w.pllm().bits(2 - 1);
-        }
+        w.set_pllm(2 - 1);
         // Multiply that by 12 in the VCO for 96 MHz.
-        unsafe {
-            w.plln().bits(12);
-        }
+        w.set_plln(12);
         // Configure the R-tap to 48 MHz output by dividing by 2. Configure P
         // and Q to valid configurations while we're at it.
-        unsafe {
-            w.pllr().bits(2 - 1);
-            w.pllp().bits(2 - 1);
-            w.pllq().bits(2 - 1);
-        }
+        w.set_pllr(2 - 1);
+        w.set_pllp(2 - 1);
+        w.set_pllq(2 - 1);
         // But we only actually turn the R tap on.
-        w.pllren().set_bit();
-        w
+        w.set_pllren(true);
     });
     // Switch it on at the RCC and wait for it to come up. RCC should still be
     // at its reset values, so we don't need to RMW it.
-    p.RCC.cr.write(|w| {
-        w.pllon().set_bit();
-        w
+    rcc.cr().write(|w| {
+        w.set_pllon(true);
     });
-    while p.RCC.cr.read().pllrdy().bit_is_clear() {
+    while !rcc.cr().read().pllrdy() {
         // spin
     }
     // Now switch over to it.
-    p.RCC.cfgr.write(|w| {
-        unsafe {
-            w.sw().bits(0b010);
-        }
-        w
+    rcc.cfgr().write(|w| {
+        w.set_sw(Sw::PLLRCLK);
     });
-    while p.RCC.cfgr.read().sws().bits() != 0b010 {
+    while rcc.cfgr().read().sws() != Sw::PLLRCLK {
         // spin
     }
 }
 
 /// Runs ST's program instead of ours.
-fn do_update(cp: cortex_m::Peripherals, p: device::Peripherals) -> ! {
+fn do_update(cp: cortex_m::Peripherals, rcc: &device::rcc::Rcc) -> ! {
     // Reverse the changes we made to check the button state.
-    p.RCC.iopenr.reset();
+    rcc.gpioenr().write_value(Gpioenr(0));
 
     // Configure to run the ROM. It appears that the ROM does not require itself
     // to be mapped at low addresses, so we can avoid reconfiguring syscfg.

@@ -28,80 +28,78 @@ use lilos::atomic::AtomicExt;
 
 use crate::{device, scanner};
 
-fn unlock(flash: &device::FLASH) {
+fn unlock(flash: &device::flash::Flash) {
     // Perform the flash controller unlock dance, as specified by RM 3.3.6
-    flash.keyr.write(|w| unsafe {
-        w.bits(0x4567_0123)
+    flash.keyr().write(|w| {
+        w.set_keyr(0x4567_0123);
     });
-    flash.keyr.write(|w| unsafe {
-        w.bits(0xCDEF_89AB)
+    flash.keyr().write(|w| {
+        w.set_keyr(0xCDEF_89AB);
     });
 }
 
-fn lock(flash: &device::FLASH) {
-    flash.cr.modify(|_, w| w.lock().set_bit());
+fn lock(flash: &device::flash::Flash) {
+    flash.cr().modify(|w| w.set_lock(true));
 }
 
-fn clear_flags(flash: &device::FLASH) {
+fn clear_flags(flash: &device::flash::Flash) {
     // Clear any errors hanging around. These bits are all write-one-to-clear.
-    flash.sr.write(|w| {
-        w.optverr().set_bit();
-        w.fasterr().set_bit();
-        w.miserr().set_bit();
-        w.pgserr().set_bit();
-        w.sizerr().set_bit();
-        w.pgaerr().set_bit();
-        w.wrperr().set_bit();
-        w.progerr().set_bit();
-        w.operr().set_bit();
-        w.eop().set_bit();
-        w
+    flash.sr().write(|w| {
+        w.set_optverr(true);
+        w.set_fasterr(true);
+        w.set_miserr(true);
+        w.set_pgserr(true);
+        w.set_sizerr(true);
+        w.set_pgaerr(true);
+        w.set_wrperr(true);
+        w.set_progerr(true);
+        w.set_operr(true);
+        w.set_eop(true);
     });
 }
 
-fn wait_for_not_busy(flash: &device::FLASH) {
+fn wait_for_not_busy(flash: &device::flash::Flash) {
     // Check that no operation is in progress.
-    while flash.sr.read().bsy().bit_is_set() {
+    while flash.sr().read().bsy() {
         // spin.
     }
 
 }
 
-fn page_erase(flash: &device::FLASH, page: u8) {
+fn page_erase(flash: &device::flash::Flash, page: u8) {
     // As specified by RM 3.3.7
 
     wait_for_not_busy(flash);
     clear_flags(flash);
 
     // Set PER and PNB in CR
-    flash.cr.modify(|_, w| {
-        w.per().set_bit();
-        unsafe {
-            w.pnb().bits(page);
-        }
-        w
+    flash.cr().modify(|w| {
+        w.set_per(true);
+        w.set_pnb(page);
     });
     // Set START in CR. The manual strongly suggests that this needs to happen
     // on a second write, but I haven't tested it.
-    flash.cr.modify(|_, w| w.strt().set_bit());
+    flash.cr().modify(|w| {
+        w.set_strt(true);
+    });
     // Wait until BSY1 clears.
-    while flash.sr.read().bsy().bit_is_set() {
+    while flash.sr().read().bsy() {
         // spin.
     }
-    flash.cr.modify(|_, w| w.per().clear_bit());
+    flash.cr().modify(|w| w.set_per(false));
 }
 
-fn enable_programming(flash: &device::FLASH) {
+fn enable_programming(flash: &device::flash::Flash) {
     wait_for_not_busy(flash);
     clear_flags(flash);
-    flash.cr.modify(|_, w| w.pg().set_bit());
+    flash.cr().modify(|w| w.set_pg(true));
 }
 
-fn disable_programming(flash: &device::FLASH) {
-    flash.cr.modify(|_, w| w.pg().clear_bit());
+fn disable_programming(flash: &device::flash::Flash) {
+    flash.cr().modify(|w| w.set_pg(false));
 }
 
-unsafe fn program(flash: &device::FLASH, address: *mut u64, source: u64) {
+unsafe fn program(flash: &device::flash::Flash, address: *mut u64, source: u64) {
     // We're using the more flexible flash programming interface that works in
     // 64-bit chunks. It's very picky about the order of writes within the
     // 64-bit chunks, however, so we're going to dissect the double-word and
@@ -112,12 +110,12 @@ unsafe fn program(flash: &device::FLASH, address: *mut u64, source: u64) {
     core::ptr::write_volatile((address as *mut u32).add(1), high);
     wait_for_not_busy(flash);
 
-    let sr = flash.sr.read();
+    let sr = flash.sr().read();
     // EOP won't be set if we're not requesting an interrupt with EOPIE, which
     // is weird and inconsistent with the other peripherals, but ok. Instead,
     // we'll check that no errors have occurred.
-    if sr.bits() & 0x3FA != 0 {
-        panic!("SR: {:08x}", sr.bits());
+    if sr.0 & 0x3FA != 0 {
+        panic!("SR: {:08x}", sr.0);
     }
 }
 
@@ -141,12 +139,12 @@ impl Default for SystemConfig {
 }
 
 pub struct Storage {
-    flash: device::FLASH,
+    flash: device::flash::Flash,
     pages: [*mut [u64; 256]; 2],
 }
 
 impl Storage {
-    pub fn new(flash: device::FLASH) -> Self {
+    pub fn new(flash: device::flash::Flash) -> Self {
         static STORAGE_TAKEN: AtomicBool = AtomicBool::new(false);
         if STORAGE_TAKEN.swap_polyfill(true, Ordering::SeqCst) {
             panic!()

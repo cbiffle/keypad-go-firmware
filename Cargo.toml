@@ -26,10 +26,10 @@ version = "0.3.0"
 default-features = false
 features = ["spsc", "systick", "mutex", "handoff"]
 
-[dependencies.stm32g0]
+[dependencies.stm32-metapac]
 default-features = false
-features = ["rt", "stm32g030"]
-version = "0.15.1"
+features = ["rt", "pac", "stm32g030f6"]
+version = "11.0"
 
 [features]
 default = ["panic-semihosting"]

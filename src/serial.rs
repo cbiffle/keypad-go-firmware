@@ -10,16 +10,17 @@
 use core::convert::Infallible;
 use core::slice::from_ref;
 
+use device::gpio::vals::{Moder, Pupdr};
 use futures::{Future, select_biased, FutureExt};
 use lilos::{exec::Notify, handoff, spsc, time::{TickTime, Millis}};
 
 use crate::{device::{self, interrupt}, scanner::{KeyState, self}, flash::{Storage, SystemConfig}};
 
-pub type Uart = device::USART1;
+pub type Uart = device::usart::Usart;
 
 pub async fn task(
     uart: &Uart,
-    gpioa: &device::GPIOA,
+    gpioa: &device::gpio::Gpio,
     keymap: &[[u8; 8]; 8],
     setup_mode: bool,
     mut from_scanner: spsc::Pop<'_, scanner::KeyEvent>,
@@ -253,26 +254,24 @@ fn pin_digit(pin: u8) -> u8 {
     b'0'.wrapping_add(pin)
 }
 
-pub fn init(gpioa: &device::GPIOA, uart: &Uart) {
-    gpioa.moder.modify(|_, w| {
-        w.moder9().alternate(); // USART1_TX
-        w.moder10().alternate(); // USART1_RX
-        w
+pub fn init(gpioa: &device::gpio::Gpio, uart: &Uart) {
+    gpioa.moder().modify(|w| {
+        w.set_moder(9, Moder::ALTERNATE); // USART1_TX
+        w.set_moder(10, Moder::ALTERNATE); // USART1_RX
     });
     // Activate a pullup on UART RX so we can pretend it's idle if
     // disconnected and keep the schmitt trigger input from burning power.
-    gpioa.pupdr.modify(|_, w| w.pupdr10().pull_up());
+    gpioa.pupdr().modify(|w| w.set_pupdr(10, Pupdr::PULLUP));
 
     // The UART is being clocked at 48 MHz. In the default 16x oversampled mode,
     // this makes the math really freaking easy. (The unwrap gets compiled out.)
     let brr = u16::try_from(48_000_000_u32 / 19_200).unwrap();
-    uart.brr.write(|w| w.brr().bits(brr));
-    uart.cr1.write(|w| {
-        w.fifoen().set_bit();
-        w.te().set_bit();
-        w.re().set_bit();
-        w.ue().set_bit();
-        w
+    uart.brr().write(|w| w.set_brr(brr));
+    uart.cr1().write(|w| {
+        w.set_fifoen(true);
+        w.set_te(true);
+        w.set_re(true);
+        w.set_ue(true);
     });
 
     unsafe {
@@ -294,12 +293,12 @@ pub async fn transmit(uart: &Uart, buffer: &[u8]) {
     for &byte in buffer {
         // Note: ISR.TXE == ISR.TXFNF (bit 7)
         //       CR1.TXEIE == CR1.TXFNFIE (bit 7)
-        if uart.isr.read().txe().bit_is_clear() {
-            uart.cr1.modify(|_, w| w.txeie().set_bit());
-            TX_AVAIL.until(|| uart.isr.read().txe().bit_is_set()).await;
+        if !uart.isr().read().txe() {
+            uart.cr1().modify(|w| w.set_txeie(true));
+            TX_AVAIL.until(|| uart.isr().read().txe()).await;
         }
 
-        uart.tdr.write(|w| w.tdr().bits(u16::from(byte)));
+        uart.tdr().write(|w| w.set_dr(u16::from(byte)));
     }
 }
 
@@ -308,15 +307,14 @@ pub fn newline(uart: &Uart) -> impl Future<Output = ()> + '_ {
 }
 
 pub fn drain(uart: &Uart) {
-    while uart.isr.read().rxne().bit_is_set() {
-        let _discard = uart.rdr.read();
+    while uart.isr().read().rxne() {
+        let _discard = uart.rdr().read();
     }
 
-    uart.icr.write(|w| {
-        w.fecf().set_bit();
-        w.ncf().set_bit();
-        w.orecf().set_bit();
-        w
+    uart.icr().write(|w| {
+        w.set_fe(true);
+        w.set_ne(true);
+        w.set_ore(true);
     });
 }
 
@@ -325,23 +323,21 @@ pub async fn recv(uart: &Uart) -> Result<u8, RxErr> {
         return out;
     }
 
-    uart.cr1.modify(|_, w| {
-        w.rxneie().set_bit();
-        w
+    uart.cr1().modify(|w| {
+        w.set_rxneie(true);
     });
-    uart.cr3.modify(|_, w| {
-        w.eie().set_bit();
-        w
+    uart.cr3().modify(|w| {
+        w.set_eie(true);
     });
     RX_AVAIL.until(|| recv_one(uart)).await
 }
 
 fn recv_one(uart: &Uart) -> Option<Result<u8, RxErr>> {
-    let isr = uart.isr.read();
+    let isr = uart.isr().read();
 
     // The overrun bit bypasses the FIFO. Check it first. Otherwise, we could
     // dequeue an inconsistent sequence of frames without noticing the overrun.
-    if isr.ore().bit_is_set() {
+    if isr.ore() {
         // Ignore other flags and discard all pending data.
         drain(uart);
         return Some(Err(RxErr::Desync));
@@ -353,7 +349,7 @@ fn recv_one(uart: &Uart) -> Option<Result<u8, RxErr>> {
     //
     // If either of these flags is set, we need to pop the RX FIFO despite not
     // honoring the data that comes out of it.
-    if isr.fe().bit_is_set() || isr.nf().bit_is_set() {
+    if isr.fe() || isr.ne() {
         // This isn't bothering distinguishing framing error from noise, because
         // currently BRK isn't significant.
 
@@ -361,15 +357,18 @@ fn recv_one(uart: &Uart) -> Option<Result<u8, RxErr>> {
         // flags if we pop the FIFO? i.e. do flags accumulate or replace when
         // the FIFO is popped? This is worth testing as it could save some
         // bytes.
-        uart.icr.write(|w| w.fecf().set_bit().ncf().set_bit());
+        uart.icr().write(|w| {
+            w.set_fe(true);
+            w.set_ne(true);
+        });
 
-        let _discard = uart.rdr.read();
+        let _discard = uart.rdr().read();
 
         return Some(Err(RxErr::FrameErr(FrameErr)));
     }
 
-    if isr.rxne().bit_is_set() {
-        return Some(Ok(uart.rdr.read().bits() as u8));
+    if isr.rxne() {
+        return Some(Ok(uart.rdr().read().0 as u8));
     }
 
     None
@@ -391,37 +390,37 @@ static RX_AVAIL: Notify = Notify::new();
 
 #[interrupt]
 fn USART1() {
-    let uart = unsafe { &*Uart::PTR };
-    let isr = uart.isr.read();
-    let cr1 = uart.cr1.read();
-    let cr3 = uart.cr3.read();
+    let uart = device::USART1;
+    let isr = uart.isr().read();
+    let cr1 = uart.cr1().read();
+    let cr3 = uart.cr3().read();
 
     let mut bits_to_clear = 0;
 
-    if cr1.txeie().bit_is_set() {
-        if isr.txe().bit_is_set() {
+    if cr1.txeie() {
+        if isr.txe() {
             TX_AVAIL.notify();
             bits_to_clear |= 1 << 7;
         }
     }
-    if cr1.tcie().bit_is_set() {
-        if isr.tc().bit_is_set() {
+    if cr1.tcie() {
+        if isr.tc() {
             TX_COMPLETE.notify();
             bits_to_clear |= 1 << 6;
         }
     }
 
     let mut notify_rx = false;
-    if cr3.eie().bit_is_set() {
-        if isr.ore().bit_is_set() || isr.fe().bit_is_set() || isr.nf().bit_is_set() {
+    if cr3.eie() {
+        if isr.ore() || isr.fe() || isr.ne() {
             notify_rx = true;
             // This is the only bit we clear in CR3, so go ahead and do it
             // instead of combining writes.
-            uart.cr3.modify(|_, w| w.eie().clear_bit());
+            uart.cr3().modify(|w| w.set_eie(false));
         }
     }
-    if cr1.rxneie().bit_is_set() {
-        if isr.rxne().bit_is_set() {
+    if cr1.rxneie() {
+        if isr.rxne() {
             notify_rx = true;
             bits_to_clear |= 1 << 5;
         }
@@ -434,7 +433,5 @@ fn USART1() {
     // This could be made conditional on bits_to_clear != 0, but (1) it should
     // almost always be nonzero, (2) it is harmless if zero, (3) this saves a
     // couple instructions and I'm feeling stingy.
-    uart.cr1.modify(|r, w| unsafe {
-        w.bits(r.bits() & !bits_to_clear)
-    });
+    uart.cr1().modify(|w| w.0 &= !bits_to_clear);
 }
