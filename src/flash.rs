@@ -28,7 +28,7 @@ use lilos::atomic::AtomicExt;
 
 use crate::{device, scanner};
 
-fn unlock(flash: &device::flash::Flash) {
+fn unlock(flash: device::flash::Flash) {
     // Perform the flash controller unlock dance, as specified by RM 3.3.6
     flash.keyr().write(|w| {
         w.set_keyr(0x4567_0123);
@@ -38,11 +38,11 @@ fn unlock(flash: &device::flash::Flash) {
     });
 }
 
-fn lock(flash: &device::flash::Flash) {
+fn lock(flash: device::flash::Flash) {
     flash.cr().modify(|w| w.set_lock(true));
 }
 
-fn clear_flags(flash: &device::flash::Flash) {
+fn clear_flags(flash: device::flash::Flash) {
     // Clear any errors hanging around. These bits are all write-one-to-clear.
     flash.sr().write(|w| {
         w.set_optverr(true);
@@ -58,7 +58,7 @@ fn clear_flags(flash: &device::flash::Flash) {
     });
 }
 
-fn wait_for_not_busy(flash: &device::flash::Flash) {
+fn wait_for_not_busy(flash: device::flash::Flash) {
     // Check that no operation is in progress.
     while flash.sr().read().bsy() {
         // spin.
@@ -66,7 +66,7 @@ fn wait_for_not_busy(flash: &device::flash::Flash) {
 
 }
 
-fn page_erase(flash: &device::flash::Flash, page: u8) {
+fn page_erase(flash: device::flash::Flash, page: u8) {
     // As specified by RM 3.3.7
 
     wait_for_not_busy(flash);
@@ -89,17 +89,17 @@ fn page_erase(flash: &device::flash::Flash, page: u8) {
     flash.cr().modify(|w| w.set_per(false));
 }
 
-fn enable_programming(flash: &device::flash::Flash) {
+fn enable_programming(flash: device::flash::Flash) {
     wait_for_not_busy(flash);
     clear_flags(flash);
     flash.cr().modify(|w| w.set_pg(true));
 }
 
-fn disable_programming(flash: &device::flash::Flash) {
+fn disable_programming(flash: device::flash::Flash) {
     flash.cr().modify(|w| w.set_pg(false));
 }
 
-unsafe fn program(flash: &device::flash::Flash, address: *mut u64, source: u64) {
+unsafe fn program(flash: device::flash::Flash, address: *mut u64, source: u64) {
     // We're using the more flexible flash programming interface that works in
     // 64-bit chunks. It's very picky about the order of writes within the
     // 64-bit chunks, however, so we're going to dissect the double-word and
@@ -249,25 +249,25 @@ impl Storage {
             | u64::from(src.scanner.driven_lines)
             | u64::from(serial) << 8;
 
-        unlock(&self.flash);
+        unlock(self.flash);
 
-        page_erase(&self.flash, page_index);
-        enable_programming(&self.flash);
+        page_erase(self.flash, page_index);
+        enable_programming(self.flash);
         unsafe {
-            program(&self.flash, base, header);
-            program(&self.flash, base.add(1), u64::from_le_bytes(src.scanner.ghost_mask));
+            program(self.flash, base, header);
+            program(self.flash, base.add(1), u64::from_le_bytes(src.scanner.ghost_mask));
         }
         for (i, chunk) in src.keymap.iter().enumerate() {
             let word = u64::from_le_bytes(*chunk);
             unsafe {
-                program(&self.flash, base.add(2 + i), word);
+                program(self.flash, base.add(2 + i), word);
             }
         }
         unsafe {
-            program(&self.flash, base.add(10), header);
+            program(self.flash, base.add(10), header);
         }
-        disable_programming(&self.flash);
-        lock(&self.flash);
+        disable_programming(self.flash);
+        lock(self.flash);
     }
 }
 

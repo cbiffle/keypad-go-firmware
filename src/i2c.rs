@@ -35,9 +35,9 @@ static TXS: AtomicU32 = AtomicU32::new(0);
 static RXS: AtomicU32 = AtomicU32::new(0);
 
 fn init(
-    rcc: &device::rcc::Rcc,
-    i2c: &device::i2c::I2c,
-    gpiob: &device::gpio::Gpio,
+    rcc: device::rcc::Rcc,
+    i2c: device::i2c::I2c,
+    gpiob: device::gpio::Gpio,
 ) {
     // Un-gate clock to our I2C block.
     rcc.apbenr1().modify(|w| w.set_i2c1en(false));
@@ -78,12 +78,12 @@ fn init(
 }
 
 pub async fn task(
-    rcc: &device::rcc::Rcc,
-    gpiob: &device::gpio::Gpio,
+    rcc: device::rcc::Rcc,
+    gpiob: device::gpio::Gpio,
     i2c: device::i2c::I2c,
     mut bytes_from_serial: spsc::Pop<'_, u8>,
 ) -> Infallible {
-    init(rcc, &i2c, gpiob);
+    init(rcc, i2c, gpiob);
 
     unsafe {
         cortex_m::peripheral::NVIC::unmask(device::Interrupt::I2C1);
@@ -116,7 +116,7 @@ pub async fn task(
         // handler. If we get a stop condition, error, or repeated start, which
         // we must eventually, the data handler will be cancelled.
         select_biased! {
-            result = terminal_condition(&i2c).fuse() => {
+            result = terminal_condition(i2c).fuse() => {
                 match result {
                     Ok(()) => {
                         STOPS.fetch_add_polyfill(1, Ordering::Relaxed);
@@ -127,13 +127,13 @@ pub async fn task(
                     }
                 }
             }
-            never = handle_data(&i2c, &mut bytes_from_serial).fuse() => match never {}
+            never = handle_data(i2c, &mut bytes_from_serial).fuse() => match never {}
         }
     }
 }
 
 async fn handle_data(
-    i2c: &device::i2c::I2c,
+    i2c: device::i2c::I2c,
     bytes_from_serial: &mut spsc::Pop<'_, u8>,
 ) -> ! {
     // Determine the direction of the transfer.
@@ -151,7 +151,7 @@ async fn handle_data(
 /// the STM32 I2C block lets us abort a transaction / start behaving as though
 /// our address never matched, so to avoid stretching the clock, we have to keep
 /// on NACKing bogus bytes.
-async fn receive_data(i2c: &device::i2c::I2c) -> ! {
+async fn receive_data(i2c: device::i2c::I2c) -> ! {
 //    i2c.cr2.modify(|_, w| {
 //        // We're going to ACK/NACK after the next byte.
 //        w.nbytes().bits(1);
@@ -200,7 +200,7 @@ async fn receive_data(i2c: &device::i2c::I2c) -> ! {
 /// direction we can't even NACK to express our displeasure. Instead, any
 /// outgoing data transfer needs to naturally pad itself with ... something.
 async fn transmit_data(
-    i2c: &device::i2c::I2c,
+    i2c: device::i2c::I2c,
     bytes_from_serial: &mut spsc::Pop<'_, u8>,
 ) -> ! {
 //    i2c.cr2.modify(|_, w| {
@@ -252,7 +252,7 @@ async fn transmit_data(
     }
 }
 
-async fn terminal_condition(i2c: &device::i2c::I2c) -> Result<(), Error> {
+async fn terminal_condition(i2c: device::i2c::I2c) -> Result<(), Error> {
     // Ensure we'll get interrupts on the conditions we're monitoring.
     i2c.cr1().modify(|w| {
         w.set_addrie(true);

@@ -19,8 +19,8 @@ use crate::{device::{self, interrupt}, scanner::{KeyState, self}, flash::{Storag
 pub type Uart = device::usart::Usart;
 
 pub async fn task(
-    uart: &Uart,
-    gpioa: &device::gpio::Gpio,
+    uart: Uart,
+    gpioa: device::gpio::Gpio,
     keymap: &[[u8; 8]; 8],
     setup_mode: bool,
     mut from_scanner: spsc::Pop<'_, scanner::KeyEvent>,
@@ -54,7 +54,7 @@ pub async fn task(
 const ESC: u8 = 0x1B;
 
 pub async fn setup(
-    uart: &Uart,
+    uart: Uart,
     mut config_to_scanner: handoff::Push<'_, scanner::Config>,
     mut from_scanner: lilos::spsc::Pop<'_, scanner::KeyEvent>,
     mut storage: Storage,
@@ -254,7 +254,7 @@ fn pin_digit(pin: u8) -> u8 {
     b'0'.wrapping_add(pin)
 }
 
-pub fn init(gpioa: &device::gpio::Gpio, uart: &Uart) {
+pub fn init(gpioa: device::gpio::Gpio, uart: Uart) {
     gpioa.moder().modify(|w| {
         w.set_moder(9, Moder::ALTERNATE); // USART1_TX
         w.set_moder(10, Moder::ALTERNATE); // USART1_RX
@@ -279,17 +279,17 @@ pub fn init(gpioa: &device::gpio::Gpio, uart: &Uart) {
     }
 }
 
-pub async fn transmit_v(uart: &Uart, buffers: &[&[u8]]) {
+pub async fn transmit_v(uart: Uart, buffers: &[&[u8]]) {
     for buffer in buffers {
         transmit(uart, buffer).await;
     }
 }
 
-pub fn transmit_byte<'a>(uart: &'a Uart, byte: &'a u8) -> impl Future<Output = ()> + 'a {
+pub fn transmit_byte<'a>(uart: Uart, byte: &'a u8) -> impl Future<Output = ()> + 'a {
     transmit(uart, from_ref(byte))
 }
 
-pub async fn transmit(uart: &Uart, buffer: &[u8]) {
+pub async fn transmit(uart: Uart, buffer: &[u8]) {
     for &byte in buffer {
         // Note: ISR.TXE == ISR.TXFNF (bit 7)
         //       CR1.TXEIE == CR1.TXFNFIE (bit 7)
@@ -302,11 +302,11 @@ pub async fn transmit(uart: &Uart, buffer: &[u8]) {
     }
 }
 
-pub fn newline(uart: &Uart) -> impl Future<Output = ()> + '_ {
+pub fn newline(uart: Uart) -> impl Future<Output = ()> {
     transmit(uart, b"\r\n")
 }
 
-pub fn drain(uart: &Uart) {
+pub fn drain(uart: Uart) {
     while uart.isr().read().rxne() {
         let _discard = uart.rdr().read();
     }
@@ -318,7 +318,7 @@ pub fn drain(uart: &Uart) {
     });
 }
 
-pub async fn recv(uart: &Uart) -> Result<u8, RxErr> {
+pub async fn recv(uart: Uart) -> Result<u8, RxErr> {
     if let Some(out) = recv_one(uart) {
         return out;
     }
@@ -332,7 +332,7 @@ pub async fn recv(uart: &Uart) -> Result<u8, RxErr> {
     RX_AVAIL.until(|| recv_one(uart)).await
 }
 
-fn recv_one(uart: &Uart) -> Option<Result<u8, RxErr>> {
+fn recv_one(uart: Uart) -> Option<Result<u8, RxErr>> {
     let isr = uart.isr().read();
 
     // The overrun bit bypasses the FIFO. Check it first. Otherwise, we could
