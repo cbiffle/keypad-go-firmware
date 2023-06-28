@@ -15,7 +15,7 @@ mod i2c;
 use core::pin::pin;
 
 use cortex_m_rt::pre_init;
-use device::{gpio::vals::{Pupdr, Moder, Idr}, rcc::{regs::Gpioenr, vals::{Pllsrc, Sw}}, flash::vals::Latency};
+use device::{gpio::vals::{Pupdr, Moder, Idr}, rcc::regs::Gpioenr, flash::vals::Latency};
 use enum_map::MaybeUninit;
 use lilos::handoff::Handoff;
 use stm32_metapac as device;
@@ -205,7 +205,10 @@ fn main() -> ! {
     )
 }
 
+#[cfg(feature = "stm32g030")]
 fn clock_setup() {
+    use device::rcc::vals::{Pllsrc, Sw};
+
     let flash = device::FLASH;
     let rcc = device::RCC;
     // We come out of reset at 16 MHz on HSI. We would like to be running at 48
@@ -276,6 +279,30 @@ fn clock_setup() {
     while rcc.cfgr().read().sws() != Sw::PLLRCLK {
         // spin
     }
+}
+
+#[cfg(feature = "stm32c011")]
+fn clock_setup() {
+    use device::rcc::vals::Hsidiv;
+
+    let flash = device::FLASH;
+    let rcc = device::RCC;
+    // We come out of reset at 12 MHz on HSI48. We would like to be running at
+    // 48 MHz.
+    //
+    // This is ... shockingly easy on this part. We just need to add a flash
+    // wait state and then change the HSI48 output divider.
+    flash.acr().modify(|w| {
+        w.set_latency(Latency::WS1);
+    });
+
+    while flash.acr().read().latency() != Latency::WS1 {
+        // spin
+    }
+
+    rcc.cr().write(|w| {
+        w.set_hsidiv(Hsidiv::DIV1);
+    });
 }
 
 /// Runs ST's program instead of ours.

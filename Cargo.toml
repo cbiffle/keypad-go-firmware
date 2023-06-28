@@ -3,7 +3,10 @@ name = "keybad-fw"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = ["panic-semihosting", "stm32g030"]
+stm32c011 = ["stm32-metapac/stm32c011f6"]
+stm32g030 = ["stm32-metapac/stm32g030f6"]
 
 [dependencies]
 cortex-m = { version = "0.7.7", features = ["inline-asm"] }
@@ -28,11 +31,8 @@ features = ["spsc", "systick", "mutex", "handoff"]
 
 [dependencies.stm32-metapac]
 default-features = false
-features = ["rt", "pac", "stm32g030f6"]
+features = ["rt", "pac"]
 version = "11.0"
-
-[features]
-default = ["panic-semihosting"]
 
 [profile.dev]
 opt-level = 1  # we don't fit at 0, and check is nice
