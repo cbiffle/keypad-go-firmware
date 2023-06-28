@@ -124,7 +124,7 @@ impl KeyEvent {
 pub async fn task(
     mut config: Config,
     mut config_update: handoff::Pop<'_, Config>,
-    gpio: &device::gpio::Gpio,
+    gpio: device::gpio::Gpio,
     mut out_queue: spsc::Push<'_, KeyEvent>,
 ) -> Infallible {
     configure_pins(gpio);
@@ -195,7 +195,7 @@ fn take_debouncers() -> &'static mut [[Debounce; 8]; 8] {
     }
 }
 
-fn configure_pins(gpio: &device::gpio::Gpio) {
+fn configure_pins(gpio: device::gpio::Gpio) {
     // Ensure all scan pins are open drain (only drive low)
     gpio.otyper().modify(|w| {
         for pin in 0..=7 {
@@ -274,7 +274,7 @@ pub enum KeyState { #[default] Up, Down }
 /// This is cancel-safe in the strict sense: if the scan is canceled, all row
 /// pins are returned to idle state (weak pull up) to ensure the _next_ scan can
 /// work.
-async fn scan(config: &Config, gpio: &device::gpio::Gpio) -> u64 {
+async fn scan(config: &Config, gpio: device::gpio::Gpio) -> u64 {
     let mut down_mask = 0;
 
     for line in 0..8 {

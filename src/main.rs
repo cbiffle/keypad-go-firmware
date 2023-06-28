@@ -67,7 +67,7 @@ fn main() -> ! {
 
     // Handle update request.
     if update_mode {
-        do_update(cp, &rcc);
+        do_update(cp, rcc);
     }
 
     // Now we can mess around with machine state to our heart's content, since
@@ -164,8 +164,8 @@ fn main() -> ! {
     let (i2c_byte_from_serial, i2c_byte_to_i2c) = i2c_byte_q.split();
 
     let serial_task = pin!(serial::task(
-        &device::USART1,
-        &gpioa,
+        device::USART1,
+        gpioa,
         &cfg.keymap,
         setup_mode,
         scan_event_to_serial,
@@ -177,13 +177,13 @@ fn main() -> ! {
     let scanner_task = pin!(scanner::task(
         cfg.scanner,
         config_from_serial,
-        &gpioa,
+        gpioa,
         scan_event_from_scanner,
     ));
 
     let i2c_task = pin!(i2c::task(
-        &rcc,
-        &gpiob,
+        rcc,
+        gpiob,
         device::I2C1,
         i2c_byte_to_i2c,
     ));
@@ -279,7 +279,7 @@ fn clock_setup() {
 }
 
 /// Runs ST's program instead of ours.
-fn do_update(cp: cortex_m::Peripherals, rcc: &device::rcc::Rcc) -> ! {
+fn do_update(cp: cortex_m::Peripherals, rcc: device::rcc::Rcc) -> ! {
     // Reverse the changes we made to check the button state.
     rcc.gpioenr().write_value(Gpioenr(0));
 
