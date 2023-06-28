@@ -114,8 +114,8 @@ fn main() -> ! {
     });
 
     device::GPIOA.afr(1).write(|w| {
-        w.set_afr(9, 1); // USART1_TX
-        w.set_afr(10, 1); // USART1_RX
+        w.set_afr(9 - 8, 1); // USART1_TX
+        w.set_afr(10 - 8, 1); // USART1_RX
 
         // Since we're using write instead of modify to save space, this will
         // change _all pins on the port_ ... which includes the SWD pins.
