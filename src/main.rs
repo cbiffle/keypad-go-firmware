@@ -354,6 +354,17 @@ fn do_update(cp: cortex_m::Peripherals, rcc: device::rcc::Rcc) -> ! {
 // to help my fledgling debugger.
 #[pre_init]
 unsafe fn pre_init() {
+    // Work around erratum "2.2.5 SRAM write error" where a reset timed _just
+    // right_ can cause the first access to an SRAM to be treated as a READ,
+    // losing a write.
+    #[cfg(feature = "stm32c011")]
+    core::arch::asm!("
+        ldr r0, =0x20000000
+        ldr r0, [r0]
+        ",
+        out("r0") _,
+        options(readonly, preserves_flags, nostack),
+    );
     core::arch::asm!("
         @ Linker script marks end of BSS+uninit with __sheap
         ldr r0, =__sheap
@@ -373,11 +384,14 @@ unsafe fn pre_init() {
         b 0b
     1:
         ",
+        out("r0") _,
+        out("r1") _,
+        out("r2") _,
         // "readonly" in that we don't write any memory visible to Rust.
-        // Could almost set "nostack" here, but it technically requires that we
-        // not write to the stack redzone. Our architecture does not have a
-        // stack redzone, but if it did, we'd be writing over it in this
-        // routine.
-        options(readonly),
+        // "nostack" technically requires that we not write the stack redzone --
+        // if our architecture had one, we'd be writing it, but it does not, and
+        // nostack is required to avoid pushing things to the stack, which would
+        // mess up the C0 erratum fix above.
+        options(readonly, nostack),
     );
 }
