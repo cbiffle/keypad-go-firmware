@@ -15,7 +15,7 @@ mod i2c;
 use core::pin::pin;
 
 use cortex_m_rt::pre_init;
-use device::{gpio::vals::{Pupdr, Moder, Idr}, rcc::regs::Gpioenr, flash::vals::Latency};
+use device::{gpio::vals::{Pupdr, Moder, Idr}, rcc::regs::Gpioenr, flash::vals::Latency, syscfg::vals::MemMode};
 use enum_map::MaybeUninit;
 use lilos::handoff::Handoff;
 use stm32_metapac as device;
@@ -35,18 +35,19 @@ fn main() -> ! {
 
     // Turn on the I/O ports we use. If we wind up jumping to the bootloader
     // instead, we'll reverse this.
-    rcc.gpioenr().write(|w| {
+    rcc.gpioenr().modify(|w| {
         w.set_gpioaen(true);
         w.set_gpioben(true);
         w.set_gpiocen(true);
     });
+    cortex_m::asm::dsb();
 
     // Switch the two control buttons to pulled-up inputs.
-    gpioc.pupdr().write(|w| {
+    gpioc.pupdr().modify(|w| {
         w.set_pupdr(14, Pupdr::PULLUP); // Update button
         w.set_pupdr(15, Pupdr::PULLUP); // Setup button
     });
-    gpioc.moder().write(|w| {
+    gpioc.moder().modify(|w| {
         w.set_moder(14, Moder::INPUT); // Update button
         w.set_moder(15, Moder::INPUT); // Setup button
     });
@@ -56,13 +57,13 @@ fn main() -> ! {
     // Read mode sense pins.
     let (update_mode, mut setup_mode) = {
         let idr = gpioc.idr().read();
-        (idr.idr(14) == Idr::HIGH, idr.idr(15) == Idr::HIGH)
+        (idr.idr(14) == Idr::LOW, idr.idr(15) == Idr::LOW)
     };
 
     // Go ahead and reset port C. We need to do it before jumping into the
     // bootloader, and we ought to do it before starting the rest of our work,
     // so, why not do it here?
-    gpioc.moder().write_value(device::gpio::regs::Moder(0));
+    gpioc.moder().write_value(device::gpio::regs::Moder(0xFFFFFFFF));
     gpioc.pupdr().write_value(device::gpio::regs::Pupdr(0));
 
     // Handle update request.
@@ -111,6 +112,9 @@ fn main() -> ! {
     device::SYSCFG.cfgr1().write(|w| {
         // TODO metapac models these bits wrong
         w.0 = w.0 | (1 << 4) | (1 << 3);
+        // This should be implicit in the definition of write, but I'm still
+        // working on understanding the value defaults in the metapac.
+        w.set_mem_mode(MemMode(0));
     });
 
     device::GPIOA.afr(1).write(|w| {
