@@ -31,7 +31,8 @@ fn main() -> ! {
     let gpioa = device::GPIOA;
     let gpiob = device::GPIOB;
     let gpioc = device::GPIOC;
-    // We are currently at 16 MHz on HSI.
+    // G0: We are currently at 16 MHz on HSI.
+    // C0: We are currently at 12 MHz on HSI48/4.
 
     // Turn on the I/O ports we use. If we wind up jumping to the bootloader
     // instead, we'll reverse this.
