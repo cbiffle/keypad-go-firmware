@@ -248,13 +248,13 @@ dependencies = [
 
 [[package]]
 name = "lilos"
-version = "0.3.0"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec87ccf7956a7a3e0a6bacefd91f950e590a0684d1d5fd9096e0e2f5bd5a0611"
+checksum = "23f903cdd21f2e62eb2e1eea677bd65cdff8808fa0949da130e68cf8f84a9068"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
- "futures",
+ "pin-project-lite",
  "scopeguard",
 ]
 
@@ -291,9 +291,9 @@ dependencies = [
 
 [[package]]
 name = "pin-project-lite"
-version = "0.2.9"
+version = "0.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0a7ae3ac2f1173085d398531c705756c94a4c56843785df85a60c1a0afac116"
+checksum = "8afb450f006bf6385ca15ef45d71d2288452bc3683ce2e2cacc0d18e4be60b58"
 
 [[package]]
 name = "pin-utils"
