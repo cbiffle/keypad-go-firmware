@@ -77,6 +77,7 @@ pub async fn setup(
           b"Press+hold any keypad button.\r\n\
           Type ESC here if no more.\r\n").await;
         let mut connectivity = [0u8; 8];
+        let mut early_releases = [0u8; 8];
         let evt = loop {
             select_biased! {
                 c = recv(uart).fuse() => {
@@ -108,6 +109,14 @@ pub async fn setup(
                 _ = lilos::exec::sleep_until(deadline).fuse() => break,
                 evt = from_scanner.pop().fuse() => {
                     connectivity[usize::from(evt.driven_line())] |= 1 << evt.sensed_line();
+                    // If the user presses and releases the key in less than 100ms
+                    // -- which is totally possible under normal circumstances --
+                    // we'll see an Up event here and need to track it so that we
+                    // don't sit there insisting the user release a key that they've
+                    // released long ago.
+                    if evt.state == KeyState::Up {
+                        early_releases[usize::from(evt.driven_line())] |= 1 << evt.sensed_line();
+                    }
                 }
             }
         }
@@ -143,12 +152,20 @@ pub async fn setup(
             transmit(uart, b"\r\nAlready configured.\r\n\
                 To reconfigure, hit RESET.\r\n").await;
         }
-        transmit(uart, b"\r\nPlease release button.\r\n").await;
 
-        while connectivity != [0; 8] {
-            let evt = from_scanner.pop().await;
-            if evt.state == KeyState::Up {
-                connectivity[usize::from(evt.driven_line())] &= !(1 << evt.sensed_line());
+        // Process early releases
+        for (conn, rel) in connectivity.iter_mut().zip(&early_releases) {
+            *conn &= !rel;
+        }
+
+        if connectivity != [0; 8] {
+            transmit(uart, b"\r\nPlease release button.\r\n").await;
+
+            while connectivity != [0; 8] {
+                let evt = from_scanner.pop().await;
+                if evt.state == KeyState::Up {
+                    connectivity[usize::from(evt.driven_line())] &= !(1 << evt.sensed_line());
+                }
             }
         }
 
