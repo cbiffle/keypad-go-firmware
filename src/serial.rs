@@ -12,7 +12,7 @@ use core::slice::from_ref;
 
 use device::gpio::vals::{Moder, Pupdr};
 use futures::{Future, select_biased, FutureExt};
-use lilos::{exec::Notify, handoff, spsc, time::{TickTime, Millis}};
+use lilos::{exec::{Notify, with_timeout}, handoff, spsc, time::Millis};
 
 use crate::{device::{self, interrupt}, scanner::{KeyState, self}, flash::{Storage, SystemConfig}};
 
@@ -103,23 +103,20 @@ pub async fn setup(
         // To allow for settling when multiple paths are connected, not to
         // mention the delay inherent in scanning multiple lines, we'll wait a
         // somewhat arbitrary period of time for more events to come in.
-        let deadline = TickTime::now() + Millis(100);
-        loop {
-            select_biased! {
-                _ = lilos::exec::sleep_until(deadline).fuse() => break,
-                evt = from_scanner.pop().fuse() => {
-                    connectivity[usize::from(evt.driven_line())] |= 1 << evt.sensed_line();
-                    // If the user presses and releases the key in less than 100ms
-                    // -- which is totally possible under normal circumstances --
-                    // we'll see an Up event here and need to track it so that we
-                    // don't sit there insisting the user release a key that they've
-                    // released long ago.
-                    if evt.state == KeyState::Up {
-                        early_releases[usize::from(evt.driven_line())] |= 1 << evt.sensed_line();
-                    }
+        with_timeout(Millis(100), async {
+            loop {
+                let evt = from_scanner.pop().await;
+                connectivity[usize::from(evt.driven_line())] |= 1 << evt.sensed_line();
+                // If the user presses and releases the key in less than 100ms
+                // -- which is totally possible under normal circumstances --
+                // we'll see an Up event here and need to track it so that we
+                // don't sit there insisting the user release a key that they've
+                // released long ago.
+                if evt.state == KeyState::Up {
+                    early_releases[usize::from(evt.driven_line())] |= 1 << evt.sensed_line();
                 }
             }
-        }
+        }).await;
 
         transmit(uart, b"Found:\r\n").await;
         let mut first_path = None;
