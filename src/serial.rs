@@ -10,7 +10,7 @@
 use core::convert::Infallible;
 use core::slice::from_ref;
 
-use device::gpio::vals::{Moder, Pupdr};
+use device::gpio::vals::Moder;
 use futures::{Future, select_biased, FutureExt};
 use lilos::{exec::{Notify, with_timeout}, handoff, spsc, time::Millis};
 
@@ -273,9 +273,12 @@ pub fn init(gpioa: device::gpio::Gpio, uart: Uart) {
         w.set_moder(9, Moder::ALTERNATE); // USART1_TX
         w.set_moder(10, Moder::ALTERNATE); // USART1_RX
     });
-    // Activate a pullup on UART RX so we can pretend it's idle if
-    // disconnected and keep the schmitt trigger input from burning power.
-    gpioa.pupdr().modify(|w| w.set_pupdr(10, Pupdr::PULLUP));
+
+    // NOTE: this is where I originally wanted to activate a UART pullup.
+    // Turning on the pullup (or pulldown!) resistors causes the pin to stop
+    // being 5V tolerant on the G0/C0 series. I feel like providing
+    // 5V-compatible I/O is much more important than avoiding some spurious UART
+    // errors, so, no pullups are being set here.
 
     // The UART is being clocked at 48 MHz. In the default 16x oversampled mode,
     // this makes the math really freaking easy. (The unwrap gets compiled out.)
