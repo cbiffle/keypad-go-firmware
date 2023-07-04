@@ -5,11 +5,11 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use device::gpio::vals::Moder;
 use device::i2c::vals::{Addmode, Reload, Dir};
-use futures::{select_biased, FutureExt};
+use futures::{select_biased, FutureExt as _};
 use lilos::atomic::AtomicArithExt;
 use lilos::exec::Notify;
+use lilos::util::FutureExt;
 use lilos::spsc;
-use scopeguard::ScopeGuard;
 
 use crate::device;
 use device::interrupt;
@@ -168,12 +168,11 @@ async fn receive_data(i2c: device::i2c::I2c) -> ! {
         // Ensure we find out about any data that appears.
         i2c.cr1().modify(|w| w.set_rxie(true));
 
-        // Ensure we turn that back off if we're cancelled.
-        scopeguard::defer! {
-            i2c.cr1().modify(|w| w.set_rxie(false));
-        }
-
-        EVT.until(|| i2c.isr().read().rxne()).await;
+        // Wait for data, being sure to turn our interrupt enable back off if
+        // we're cancelled. (The ISR will turn it off if we wake.)
+        EVT.until(|| i2c.isr().read().rxne())
+            .on_cancel(|| i2c.cr1().modify(|w| w.set_rxie(false)))
+            .await;
 
         // Pull the data out.
         let byte = i2c.rxdr().read().rxdata();
@@ -217,14 +216,11 @@ async fn transmit_data(
         // Ensure we find out about any data that appears.
         i2c.cr1().modify(|w| w.set_txie(true));
 
-        // Ensure we turn that back off if we're cancelled.
-        let txguard = scopeguard::guard((), |()| {
-            i2c.cr1().modify(|w| w.set_txie(false));
-        });
-
-        EVT.until(|| i2c.isr().read().txis()).await;
-
-        ScopeGuard::into_inner(txguard);
+        // Wait for events, turning that back off if we're cancelled. (The ISR
+        // will turn it off if we wake.)
+        EVT.until(|| i2c.isr().read().txis())
+            .on_cancel(|| i2c.cr1().modify(|w| w.set_txie(false)))
+            .await;
 
         // Send the next byte.
         let byte = bytes_from_serial.try_pop().unwrap_or(0);
@@ -234,14 +230,11 @@ async fn transmit_data(
         // Wait for TCR event.
         i2c.cr1().modify(|w| w.set_tcie(true));
 
-        // Ensure we turn that back off if we're cancelled.
-        let tcguard = scopeguard::guard((), |()| {
-            i2c.cr1().modify(|w| w.set_tcie(false));
-        });
-
-        EVT.until(|| i2c.isr().read().tcr()).await;
-
-        ScopeGuard::into_inner(tcguard);
+        // Wait for events, turning that back off if we're cancelled. (The ISR
+        // will turn it off if we wake.)
+        EVT.until(|| i2c.isr().read().tcr())
+            .on_cancel(|| i2c.cr1().modify(|w| w.set_tcie(false)))
+            .await;
 
         i2c.cr2().modify(|w| {
             // We'll do one byte again.
@@ -260,11 +253,11 @@ async fn terminal_condition(i2c: device::i2c::I2c) -> Result<(), Error> {
         w.set_errie(true);
     });
 
+    // Make sure all our interrupt enables are clear no matter how we leave the
+    // routine -- the ISR will have cleared one of them but probably not all. (We
+    // likely won't be cancelled because of how the driver is constructed, but
+    // it's still nice to do things the right way.)
     scopeguard::defer! {
-        // Make sure all our interrupt enables are clear -- the ISR will have
-        // cleared one of them but probably not both. (We likely won't be
-        // cancelled because of how the driver is constructed, but it's still
-        // nice to do things the right way.)
         i2c.cr1().modify(|w| {
             w.set_addrie(false);
             w.set_stopie(false);
