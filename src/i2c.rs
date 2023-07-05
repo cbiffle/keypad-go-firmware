@@ -152,16 +152,6 @@ async fn handle_data(
 /// our address never matched, so to avoid stretching the clock, we have to keep
 /// on NACKing bogus bytes.
 async fn receive_data(i2c: device::i2c::I2c) -> ! {
-//    i2c.cr2.modify(|_, w| {
-//        // We're going to ACK/NACK after the next byte.
-//        w.nbytes().bits(1);
-//        // It won't be the last one.
-//        w.reload().set_bit();
-//        w
-//    });
-//    // Clear ADDR flag, ending any clock stretching.
-//    i2c.icr.write(|w| w.addrcf().set_bit());
-
     let mut nacking = false;
 
     loop {
@@ -202,16 +192,6 @@ async fn transmit_data(
     i2c: device::i2c::I2c,
     bytes_from_serial: &mut spsc::Pop<'_, u8>,
 ) -> ! {
-//    i2c.cr2.modify(|_, w| {
-//        // We're going to move one byte.
-//        w.nbytes().bits(1);
-//        // It won't be the last one.
-//        w.reload().set_bit();
-//        w
-//    });
-//    // Clear ADDR flag, ending any clock stretching.
-//    i2c.icr.write(|w| w.addrcf().set_bit());
-
     loop {
         // Ensure we find out about any data that appears.
         i2c.cr1().modify(|w| w.set_txie(true));
