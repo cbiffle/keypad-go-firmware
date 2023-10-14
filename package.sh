@@ -11,5 +11,9 @@ $BUILD stm32c011,panic-halt
 arm-none-eabi-objcopy -Obinary $OUT/keybad-fw $OUT/C011xx.bin
 cp $OUT/C011xx.bin $OUT/C031xx.bin
 
+cargo metadata --format-version 1 \
+    | jq -r '.resolve.root as $root | .packages[] | select(.id == $root) | .version' \
+    > $OUT/VERSION
+
 cd $OUT
-zip firmware.zip C031xx.bin C011xx.bin G03xxx_G04xxx.bin
+zip firmware.zip VERSION C031xx.bin C011xx.bin G03xxx_G04xxx.bin
