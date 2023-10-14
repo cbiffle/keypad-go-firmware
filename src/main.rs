@@ -18,9 +18,12 @@
 #![no_std]
 #![no_main]
 
+// The default production config halts on panic, excluding the formatting
+// machinery and saving a solid 7 kiB.
 #[cfg(feature = "panic-halt")]
 extern crate panic_halt;
 
+// Enable this instead to get nicely formatted panics through your debug probe.
 #[cfg(feature = "panic-semihosting")]
 extern crate panic_semihosting;
 
@@ -29,25 +32,29 @@ mod scanner;
 mod flash;
 mod i2c;
 
-use core::pin::pin;
+use stm32_metapac as device;
 
+use core::{mem::MaybeUninit, pin::pin};
 use cortex_m_rt::pre_init;
 use device::{gpio::vals::{Pupdr, Moder, Idr}, rcc::regs::Gpioenr, flash::vals::Latency, syscfg::vals::MemMode};
-use enum_map::MaybeUninit;
-use lilos::handoff::Handoff;
-use stm32_metapac as device;
-use lilos::spsc::Queue;
+use lilos::{handoff::Handoff, spsc::Queue};
 
 use crate::flash::SystemConfig;
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
+    // Safety: as long as this only happens in main we won't anger cortex_m's
+    // notion of peripheral exclusiveness. Doing it this way avoids compiling in
+    // the panic that they otherwise unconditionally include.
     let mut cp = unsafe { cortex_m::Peripherals::steal() };
 
+    // Shorthand!
     let rcc = device::RCC;
     let gpioa = device::GPIOA;
     let gpiob = device::GPIOB;
     let gpioc = device::GPIOC;
+
+    // Clock situation:
     // G0: We are currently at 16 MHz on HSI.
     // C0: We are currently at 12 MHz on HSI48/4.
 
@@ -90,7 +97,8 @@ fn main() -> ! {
     }
 
     // Now we can mess around with machine state to our heart's content, since
-    // we won't need to precisely reverse the changes!
+    // we won't need to precisely reverse the changes to avoid confusing ST's
+    // boot ROM!
     //
     // Let's go faster.
     clock_setup();
@@ -106,12 +114,12 @@ fn main() -> ! {
         w.set_syscfgen(true);
     });
 
-    cortex_m::asm::dsb(); // probably not necessary on M0?
+    cortex_m::asm::dsb(); // probably not necessary on M0? Eh, whatev
 
     // Pin configuration:
     //
     // PA0-7: keyboard matrix GPIO
-    // PA8: VCC sense (possibly unnecessary, try using internal source)
+    // PA8: debug/logic analyzer output
     // PA11[PA9]: as PA9, USART1_TX (AF1)
     // PA12[PA10]: as PA10, USART1_RX (AF1)
     // PA13: SWDIO (default)
@@ -155,7 +163,9 @@ fn main() -> ! {
     });
 
     let storage = flash::Storage::new(device::FLASH);
-    // Ensure that the RAM config goes somewhere I can find in a debugger!
+
+    // Ensure that the RAM config goes somewhere I can find in a debugger! i.e.
+    // somewhere with a name, off the stack.
     let cfg = {
         static mut ACTIVE_CONFIG: SystemConfig = SystemConfig::DEFAULT;
         // Safety: we're relying on the fact that this is in main to ensure that
@@ -171,16 +181,18 @@ fn main() -> ! {
     // Task setup starts here-ish
     //
 
-    // Allocate the scanner-to-serial event queue.
+    // Allocate the scanner-to-serial event queue. Small enough that I'm just
+    // putting it on the stack.
     let mut scan_event_storage = [MaybeUninit::uninit(); 16];
     let mut scan_event_q = pin!(Queue::new(&mut scan_event_storage));
     let (scan_event_from_scanner, scan_event_to_serial) = scan_event_q.split();
 
-    // Allocate the serial-to-scanner synchronous config handoff.
+    // Allocate the serial-to-scanner synchronous config handoff (no storage
+    // required)
     let mut config_handoff = Handoff::new();
     let (config_to_scanner, config_from_serial) = config_handoff.split();
 
-    // Allocate the serial-to-I2C byte queue.
+    // Allocate the serial-to-I2C byte queue, also on the stack.
     let mut i2c_byte_storage = [MaybeUninit::uninit(); 16];
     let mut i2c_byte_q = pin!(Queue::new(&mut i2c_byte_storage));
     let (i2c_byte_from_serial, i2c_byte_to_i2c) = i2c_byte_q.split();
@@ -220,6 +232,8 @@ fn main() -> ! {
         ],
         lilos::exec::ALL_TASKS,
         || {
+            // Uncomment these lines to get "CPU active" signals on PA8 for
+            // performance measurement.
             //p.GPIOA.bsrr.write(|w| w.br8().set_bit());
             cortex_m::asm::wfi();
             //p.GPIOA.bsrr.write(|w| w.bs8().set_bit());
@@ -368,8 +382,6 @@ fn do_update(cp: cortex_m::Peripherals, rcc: device::rcc::Rcc) -> ! {
     }
 }
 
-// Using a pre-init hook here to fill the stack with a recognizable bit pattern,
-// to help my fledgling debugger.
 #[pre_init]
 unsafe fn pre_init() {
     // Work around erratum "2.2.5 SRAM write error" where a reset timed _just
@@ -383,6 +395,9 @@ unsafe fn pre_init() {
         out("r0") _,
         options(readonly, preserves_flags, nostack),
     );
+
+    // Using a pre-init hook here to fill the stack with a recognizable bit
+    // pattern, to help my fledgling debugger.
     core::arch::asm!("
         @ Linker script marks end of BSS+uninit with __sheap
         ldr r0, =__sheap

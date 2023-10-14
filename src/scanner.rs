@@ -68,10 +68,15 @@ use lilos::time::{TickTime, Millis};
 
 use crate::device;
 
+/// Wanna alter the scan interval? Well here it is.
+const SCAN_INTERVAL: Millis = Millis(1);
+
+/// Scanner configuration state.
 #[derive(Copy, Clone, Debug)]
 pub struct Config {
     /// Repeated in events to distinguish events derived from this config from
-    /// those derived from some previous config.
+    /// those derived from some previous config. (This only matters during
+    /// online reconfiguration.)
     pub epoch: u8,
     /// For each connection to the keypad 0-7, this byte contains a 1 in the
     /// corresponding bit if the line should be driven low during scan, and a 0
@@ -89,8 +94,11 @@ impl Config {
     /// This only applies during the brief window at the start of setup, before
     /// the setup program starts overriding the config.
     ///
-    /// Having this value be all zeroes also ensures that statics including it
-    /// go in BSS, rather than getting an init image.
+    /// Having this value be all zeroes also ensures that statics that include
+    /// it go in BSS, rather than getting an init image.
+    ///
+    /// This is a const because it needs to appear in static initializers, where
+    /// `Default` can't yet go.
     pub const DEFAULT: Self = Self {
         epoch: 0,
         driven_lines: 0,
@@ -104,27 +112,43 @@ impl Default for Config {
     }
 }
 
+/// Event produced, and stuffed into a queue, when something happens.
 #[derive(Copy, Clone, Debug)]
 pub struct KeyEvent {
     /// Epoch of config that generated this event.
     pub epoch: u8,
     /// Designates a matrix position by encoding the driven line (0-7) in the
-    /// least significant 3 bits, and the received line (0-7) in the most
+    /// least significant 3 bits, and the received line (0-7) in the next-most
     /// significant 3 bits, producing a number between 0 and 63, inclusive.
+    ///
+    /// (See `driven_line` and `sensed_line` for help here.)
     pub coord: u8,
     /// What state the key was determined to be in, now.
     pub state: KeyState,
 }
 
 impl KeyEvent {
-    pub fn driven_line(&self) -> u8 {
-        self.coord & 0x7
+    /// Extracts the index (0-7) of the line that was being driven when this
+    /// event was sensed.
+    pub fn driven_line(&self) -> usize {
+        usize::from(self.coord & 0x7)
     }
-    pub fn sensed_line(&self) -> u8 {
-        (self.coord >> 3) & 0x7
+    /// Extracts the index (0-7) of the line that was sensed, causing this
+    /// event.
+    pub fn sensed_line(&self) -> usize {
+        usize::from((self.coord >> 3) & 0x7)
     }
 }
 
+/// States keys can be in.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
+pub enum KeyState { #[default] Up, Down }
+
+/// Keypad scanner loop.
+///
+/// Pass this its initial `config` plus a handoff channel through which it can
+/// receive updated configs. It'll scan the provided GPIO port (pins 0-7) and
+/// emit events through `out_queue`.
 pub async fn task(
     mut config: Config,
     mut config_update: handoff::Pop<'_, Config>,
@@ -134,7 +158,7 @@ pub async fn task(
     configure_pins(gpio);
 
     let debouncers = take_debouncers();
-    let mut scan_gate = PeriodicGate::from(Millis(1));
+    let mut scan_gate = PeriodicGate::from(SCAN_INTERVAL);
     loop {
         scan_gate.next_time().await;
 
@@ -142,20 +166,27 @@ pub async fn task(
         if let Some(new_config) = config_update.try_pop() {
             // Handle any "killed" drive lines. This occurs when the
             // `driven_lines` bit was 1 in the old config, and is becoming 0.
-            for line in 0..8 {
+            // When a drive line is killed we need to reset the state of its
+            // debouncers so they don't do anything.
+            for (line, debounce_row) in debouncers.iter_mut().enumerate() {
                 let line_mask = 1 << line;
-                if config.driven_lines & line_mask != 0 && new_config.driven_lines & line_mask == 0 {
-                    for col in 0..8 {
-                        debouncers[line][col] = Default::default();
+                let in_use_before = config.driven_lines & line_mask != 0;
+                let still_in_use = new_config.driven_lines & line_mask != 0;
+                if in_use_before && !still_in_use {
+                    for debouncer in debounce_row {
+                        *debouncer = Default::default();
                     }
                 }
             }
             // Handle any "killed" keys. This occurs when the key's bit in the
-            // `ghost_mask` was not set before, but has become set.
+            // `ghost_mask` was not set before, but has become set. As in the
+            // killed line case, we need to reset its debouncer state.
             for line in 0..8 {
                 for col in 0..8 {
                     let col_mask = 1 << col;
-                    if config.ghost_mask[line] & col_mask == 0 && new_config.ghost_mask[line] & col_mask != 0 {
+                    let real_before = config.ghost_mask[line] & col_mask == 0;
+                    let still_real = new_config.ghost_mask[line] & col_mask != 0;
+                    if real_before && !still_real {
                         debouncers[line][col] = Default::default();
                     }
                 }
@@ -166,18 +197,31 @@ pub async fn task(
         // Config doesn't get modified anywhere else in this loop -- see:
         let config = &config;
 
+        // Run the scan algorithm to determine what connections are currently
+        // live.
         let down_mask = scan(config, gpio).await;
 
+        // Process each potential key in the grid.
         for line in 0..8 {
             for col in 0..8 {
-                let s = if down_mask & (1 << (8 * line + col)) != 0 { KeyState::Down } else { KeyState::Up };
+                let s = if down_mask & (1 << (8 * line + col)) != 0 {
+                    KeyState::Down
+                } else {
+                    KeyState::Up
+                };
                 if let Some(new_state) = debouncers[line][col].step(s) {
-                    let evt = KeyEvent {
+                    // Try to send the key event, but if the queue fills up,
+                    // tolerate that and move on. This means we won't block
+                    // keyboard scanning in the event of backpressure (the
+                    // consumer failing to keep up with our generated events).
+                    // We've gotta make this decision _somewhere_ and this is
+                    // the simplest place. In practice, our consumer is real
+                    // fast and can't block.
+                    out_queue.try_push(KeyEvent {
                         epoch: config.epoch,
                         coord: (line | (col << 3)) as u8,
                         state: new_state,
-                    };
-                    out_queue.try_push(evt).ok();
+                    }).ok();
                 }
             }
         }
@@ -185,6 +229,8 @@ pub async fn task(
     }
 }
 
+/// Allocate and initialize the static debouncer array using the First Mover
+/// Allocator pattern.
 fn take_debouncers() -> &'static mut [[Debounce; 8]; 8] {
     static DEBOUNCERS_TAKEN: AtomicBool = AtomicBool::new(false);
     if DEBOUNCERS_TAKEN.swap_polyfill(true, Ordering::SeqCst) {
@@ -206,6 +252,7 @@ fn configure_pins(gpio: device::gpio::Gpio) {
             w.set_ot(pin, Ot::OPENDRAIN);
         }
     });
+    // Activate weak pullups.
     gpio.pupdr().modify(|w| {
         for pin in 0..=7 {
             w.set_pupdr(pin, Pupdr::PULLUP);
@@ -224,19 +271,32 @@ fn configure_pins(gpio: device::gpio::Gpio) {
     });
 }
 
+/// State maintained for debouncing a single key.
 #[derive(Copy, Clone, Debug, Default)]
 struct Debounce {
+    /// We're pretty sure the key has been hanging out in this state.
     stable_state: KeyState,
+    /// If we've seen the key leave `stable_state`, this will be `Some`
+    /// containing the timestamp when that happened. If the key goes back to
+    /// `stable_state` we'll clear this back to `None`. Debouncing happens by
+    /// noticing that this is `Some` and that the timestamp has gotten old
+    /// enough.
     last_change: Option<TickTime>,
 }
 
 impl Debounce {
+    /// How long a key is required to be stable before we commit to it.
     const PERIOD: Millis = Millis(5);
+
+    /// Default const for static initializers.
     const DEFAULT: Self = Self {
         stable_state: KeyState::Up,
         last_change: None,
     };
 
+    /// Move the debouncing state machine forward. `input_state` is the observed
+    /// electrical state of the key right now. If the state machine decides a
+    /// real key change has occurred, it will return `Some` with the new state.
     pub fn step(&mut self, input_state: KeyState) -> Option<KeyState> {
         if input_state == self.stable_state {
             // No longer tracking a change.
@@ -256,9 +316,6 @@ impl Debounce {
         None
     }
 }
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
-pub enum KeyState { #[default] Up, Down }
 
 /// Scans a keypad matrix of up to 64 keys (well, 56, really) using the geometry
 /// defined in `config`.
@@ -283,6 +340,8 @@ async fn scan(config: &Config, gpio: device::gpio::Gpio) -> u64 {
 
     for line in 0..8 {
         let line_mask = 1 << line;
+        // Skip any lines we don't drive. (This processor doesn't have a cheap
+        // count-trailing-zeros operation so we do this the hard way.)
         if config.driven_lines & line_mask == 0 {
             continue;
         }
@@ -293,40 +352,48 @@ async fn scan(config: &Config, gpio: device::gpio::Gpio) -> u64 {
         });
         // Make sure this pin gets released if we're canceled in the yield
         // below.
-        let pin_guard = scopeguard::guard((), |_| {
-            // Release the row line by setting the corresponding SET bit.
-            gpio.bsrr().write(|w| w.0 = u32::from(line_mask));
-        });
+        let return_states = {
+            scopeguard::defer! {
+                // Release the row line by setting the corresponding SET bit.
+                gpio.bsrr().write(|w| w.0 = u32::from(line_mask));
+            }
 
-        // Sleep a bit to allow charge to move around. (CANCEL POINT)
-        lilos::exec::yield_cpu().await;
+            // Sleep a bit to allow charge to move around. (CANCEL POINT)
+            //
+            // This sleep is long enough for all the matrices I've tested, but
+            // is not of any particular defined period -- it depends on the
+            // implementation of the executor and the number of pending tasks.
+            // Might be worth considering converting this back to a sleep(1)?
+            lilos::exec::yield_cpu().await;
 
-        // Collect return states. Inactive lines will be pulled up by their
-        // resistors, active columns will be pulled down by the driven pin. So
-        // we invert here.
-        let return_states = gpio.idr().read().0 as u8 ^ 0xFF;
-        // Discharge the guard so we release the pin and the matrix can
-        // start returning to idle charge.
-        drop(pin_guard);
+            // Collect return states. Inactive lines will be pulled up by their
+            // resistors, active columns will be pulled down by the driven pin.
+            // So we invert here.
+            !(gpio.idr().read().0 as u8)
+            // The deferred block above will fire here, releasing the pin and
+            // returning the matrix to idle charge level.
+        };
 
         // Pick over our results.
-        let ghost_mask = config.ghost_mask[line];
-        for col in 0..8 {
-            if col == line {
-                // Trivial ghost key, skip
-                continue;
-            }
-
-            let col_mask = 1 << col;
-            if ghost_mask & col_mask != 0 {
-                // Configured ghost key, skip
-                continue;
-            }
-            if return_states & col_mask != 0 {
-                // Oh hey! A non-ghost key!
-                down_mask |= 1 << (8 * line + col);
-            }
-        }
+        //
+        // Get the configured ghost keys for this line, and add in the bit
+        // corresponding to the trivial "pin drives itself" net. (This isn't
+        // permanently set in the ghost mask in RAM because that'd require its
+        // initializer to be something other than all zeroes, forcing more data
+        // into flash.)
+        let ghost_mask = config.ghost_mask[line] | (1 << line);
+        // Handle all of the columns in parallel.
+        //
+        // For each column we want to set a bit in down_mask if the
+        // corresponding bit in return_states is set, _unless_ that bit is also
+        // set in ghost_mask. This comes out to (pretending for the moment that
+        // we can index bits in bytes like in Verilog):
+        //
+        // !ghost_mask[col] & return_states[col]
+        //
+        // ...which is equivalent to the byte-level logical operation.
+        let line_state = return_states & !ghost_mask;
+        down_mask |= u64::from(line_state) << (8 * line);
     }
 
     down_mask
