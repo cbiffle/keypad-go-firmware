@@ -1,3 +1,20 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Keyboard scanner firmware entry point.
+//!
+//! # Target architecture
+//!
+//! This firmware supports both STM32G030 and STM32C011 microcontrollers, to
+//! keep costs down. This has introduced some complexity. In cases where you
+//! encounter a `cfg(feature = "stm32c011")` or `cfg(feature = "stm32g030")`,
+//! that's providing specific code for one microcontroller or another.
+//!
+//! Note that these microcontrollers are pretty similar, but are _not_ binary
+//! compatible, so if you flash the build for the wrong chip, things will go
+//! poorly and you'll need a SWD interface to recover.
+
 #![no_std]
 #![no_main]
 
