@@ -6,9 +6,12 @@ BUILD="cargo build --release --no-default-features --features"
 OUT=target/thumbv6m-none-eabi/release
 
 $BUILD stm32g030,panic-halt
+cp $OUT/keybad-fw $OUT/G03xxx_G04xxx.elf
 arm-none-eabi-objcopy -Obinary $OUT/keybad-fw $OUT/G03xxx_G04xxx.bin
 $BUILD stm32c011,panic-halt
+cp $OUT/keybad-fw $OUT/C011xx.elf
 arm-none-eabi-objcopy -Obinary $OUT/keybad-fw $OUT/C011xx.bin
+cp $OUT/C011xx.elf $OUT/C031xx.elf
 cp $OUT/C011xx.bin $OUT/C031xx.bin
 
 cargo metadata --format-version 1 \
@@ -16,4 +19,6 @@ cargo metadata --format-version 1 \
     > $OUT/VERSION
 
 cd $OUT
-zip firmware.zip VERSION C031xx.bin C011xx.bin G03xxx_G04xxx.bin
+zip firmware.zip VERSION \
+    C031xx.bin C011xx.bin G03xxx_G04xxx.bin \
+    C031xx.elf C011xx.elf G03xxx_G04xxx.elf
