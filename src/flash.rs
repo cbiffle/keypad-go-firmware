@@ -1,4 +1,8 @@
-//! STM32G0 in-application flash programming driver.
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! STM32G0/C0 in-application flash programming driver.
 //!
 //! Citations to RM here refer to the STM32G0 Reference Manual (RM0454) revision
 //! 5.
