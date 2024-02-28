@@ -1,0 +1,203 @@
+# Keypad:GO! firmware
+
+**Status:** production tested, shipping to customers.
+
+This is the source code for my [Keypad:GO!] widget. If it looks useful to you,
+consider buying one --- I've tried to price them such that it's cheaper than
+building your own.
+
+## How to install this firmware
+
+**Note: installing the firmware using the methods described on this page will
+erase Keypad:GO!'s memory of your keypad matrix. You will have to re-run the
+Setup process. Please let me know if this is irritating and I can see about
+improving it.**
+
+If you don't want to build this from source, you can [download a released
+version](https://github.com/cbiffle/keypad-go-firmware/releases). If you *do*
+want to build this from source, see the section _Building_ below.
+
+### Installing using `keypad-go-updater`
+
+The easiest way to install firmware updates on Keypad:GO! is using the
+[`keypad-go-updater`] tool. This is the tool I use to program boards in
+production before shipping.
+
+1. Download the firmware release you want to program. Specifically, you want a
+   file named `keypad-go-firmware-X.Y.Z.zip` where X, Y, and Z are numbers.
+2. Connect Keypad:GO! to your computer using a TTL-serial cable, as described in
+   the user manual.
+3. Figure out what your operating system has named that serial interface —
+   usually something like `/dev/ttyUSB0` on Linux, `COM3` on Windows, etc. When
+   the instructions below mention `PORT`, substitute this name.
+4. Press and hold the UPDATE button on Keypad:GO!. While holding it, press and
+   release the RESET button. Release the UPDATE button.
+5. From inside your checkout of `keypad-go-updater`, run:
+    `cargo run -p PORT path/to/keypad-go-firmware-X.Y.Z.zip` — replacing
+    `PORT` with the appropriate name on your computer.
+
+This will identify the board, flash the appropriate image from the `.zip` file,
+and run a basic test to verify that the firmware booted correctly.
+
+### Installing using a different STM32 flasher
+
+You can also flash Keypad:GO! using a different program — maybe you don't or
+can't install a Rust toolchain to build `keypad-go-updater`. This process is a
+little more involved.
+
+1. Get the firmware `.zip` file described above.
+2. Unzip it.
+3. It will contain at least two files ending in `.bin`. Choose the one of these
+   that matches the microcontroller on your board — either an STM32C0 or an
+   STM32G0.
+4. Feed this file to an STM32 serial flashing program.
+
+Alternatively, if your flashing program supports ELF files directly ([like this
+one does](https://github.com/cbiffle/stm32-uart-boot/)), use the `.elf` files
+from the package instead.
+
+## Building from source
+
+You will need the following software installed:
+
+- A Rust toolchain, installed via `rustup`.
+- An STM32 bootloader flashing tool that can process ELF files, such as [the one
+  I wrote for this purpose][stm32-uart-boot]. For the instructions below I'll
+  assume you have used `cargo install` to make it available with the name
+  `stm32-uart-boot`. You can also run it directly out of its repository.
+
+This is enough to flash Keypad:GO! over a TTL serial connection. 
+
+Keypad:GO! currently comes in two variants, using the STM32G030 and STM32C011
+processors. Each processor requires a different build of the firmware. If you're
+building the firmware yourself, you will need to be mindful of this!
+
+To manually build for the STM32G030 processor (the default), run:
+
+```
+cargo build --release
+```
+
+To instead build for the STM32C011 processor, you must add two flags:
+
+```
+cargo build --release --no-default-features --features stm32c011,panic-halt
+```
+
+Either way, the output file will be deposited at the path
+`target/thumbv6m-none-eabi/release/keybad-fw`.
+
+Connect Keypad:GO! to a TTL serial cable according to the instructions in its
+user manual. This cable will appear as a named or numbered serial port on your
+computer, like `/dev/ttyUSB1` or `COM3`. Let's pretend it's named `PORT` --
+replace `PORT` in the commands below with the right name for your computer.
+
+Hold down the UPDATE button on Keypad:GO! and, without letting it go, tap the
+RESET button. (You can now release UPDATE.) This puts Keypad:GO! into firmware
+update mode.
+
+Run:
+
+```
+stm32-uart-boot PORT load target/thumbv6m-none-eabi/release/keybad-fw
+```
+
+(Or an equivalent command in the STM32 loader program of your choice.)
+
+Now reset Keypad:GO! using its RESET button, and you should be running the new
+firmware.
+
+### Building using the packaging script
+
+If you're on a Unix-like operating system and can install the
+`arm-none-eabi-objcopy` tool from your package manager, you can also use my
+`package.sh` script to do the job. This is what I use to generate releases.
+
+Run: `./package.sh`
+
+The output will be dropped in the root of the repository, in a file named
+`keypad-go-firmware-X.Y.Z.zip`. If this is confusing and you'd like to change
+the version number to something that distinguishes your version from the
+released versions, locally edit `Cargo.toml` and change the version to something
+like `1.0.0-mine` or the value of your choice.
+
+
+## Hacking on the firmware
+
+This firmware is written in Rust and runs on top of [`lilos`], my async embedded
+operating system. It's structured into three concurrent tasks, each managing a
+different I/O interface:
+
+- `scanner` handles matrix scanning and debouncing.
+- `serial` manages the serial port where keys are emitted.
+- `i2c` provides the optional I2C polling interface.
+
+Each task is in a separate source file, because I have an easier time keeping
+track of them that way... and because the `serial` code is rather long.
+
+
+### Debugging
+
+For interactive debugging, I suggest using OpenOCD and GDB. You need a few more
+things for this to work:
+
+- OpenOCD (I've mostly tested using version 0.12)
+- `arm-none-eabi-gdb` (I've mostly tested using 13.2)
+- An SWD interface, ideally an STLink. Other SWD interfaces will work, but
+  you'll need to modify the OpenOCD config in the repo to specify the right one,
+  and that's out of scope for this README.
+- A TagConnect SWD cable. To keep costs down for my users, Keypad:GO! does not
+  have a full 10-pin SWD connector on the board. However, this does mean that
+  debugging Keypad:GO! requires the purchase of this weird cable. You could
+  probably also solder wires to the SWD pads in a pinch, but doing so is out of
+  scope for this README.
+
+Note that **this section is not intended to be a tutorial for first-time users
+of OpenOCD or GDB.** It's intended for users already familiar with both tools.
+
+To flash and debug firmware, you now need to do the following:
+
+Connect your SWD interface using the TagConnect cable.
+
+Ensure Keypad:GO! is powered, probably over the same TTL serial cable as
+described above and in the manual.
+
+In one terminal, run `openocd` from the firmware checkout directory. This should
+cause it to load the `openocd.cfg` file that's checked in, find your SWD
+interface, and print some stuff about the CPU.
+
+In another terminal, if you have an STM32G0, run
+
+```
+cargo run --release
+```
+
+Or for STM32C011, run
+
+```
+cargo run --release --no-default-features --features stm32c011,panic-halt
+```
+
+### Seeing panic messages
+
+If you're doing something interesting, you'll probably eventually get the
+firmware to panic. By default, this just stops the system, requiring a reset.
+During development it's super valuable to see the text of the panic messages,
+and there's an optional feature for that.
+
+Instead of the build commands above, use:
+
+```
+# STM32G030:
+cargo run --release --no-default-features --features stm32g030,panic-semihosting
+# STM32C011:
+cargo run --release --no-default-features --features stm32c011,panic-semihosting
+```
+
+This isn't turned on in production releases because it adds a significant amount
+of size to the firmware.
+
+[Keypad:GO!]: https://www.tindie.com/products/owl/keypad-go/
+[stm32-uart-boot]: https://github.com/cbiffle/stm32-uart-boot/
+[`lilos`]: https://github.com/cbiffle/lilos
+[`keypad-go-updater`]: https://github.com/cbiffle/keypad-go-updater
