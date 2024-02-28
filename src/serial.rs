@@ -16,8 +16,9 @@
 //!
 //! During normal operation, the serial task also copies every transmitted byte
 //! into a queue for the I2C interface. This queue _can_ back up, in which case
-//! data will be lost. This provides the I2C interface's behavior on key buffer
-//! overflow, which is described in the product manual.
+//! data will be lost from the perspective of an I2C client. This causes the
+//! I2C interface's behavior on key buffer overflow, which is described in the
+//! product manual.
 //!
 //! During setup mode, we do something entirely different and slightly grody,
 //! which I'll discuss at the `setup` routine below.

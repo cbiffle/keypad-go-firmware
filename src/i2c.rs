@@ -10,12 +10,15 @@
 //!
 //! The I2C driver receives fully processed 8-bit key event bytes from the
 //! serial task. This centralizes key processing in one place (serial). Because
-//! the serial task is asynchronous and thus always has permission to transmit,
-//! it can always process a key promptly -- whereas the I2C task only speaks
-//! when asked by the host. So, the serial task drives and we listen.
+//! the serial task's interface (the serial port) is asynchronous without flow
+//! control, and thus always has permission to transmit, that task can always
+//! process a key promptly -- whereas the I2C task only speaks when asked by the
+//! host. So, the serial task drives and we listen.
 //!
 //! The queue coming from the serial task *is* the outstanding key buffer. We
-//! pop from it when the host asks us to, and otherwise leave it alone.
+//! pop from it only when the host asks us to, and otherwise leave it alone. If
+//! multiple key events occur between I2C polls, they will pile up in that
+//! queue.
 //!
 //! This driver is strangely factored, but the factoring has proven rather
 //! powerful. I'm not sure I'd suggest this as the "right" way of writing an I2C
@@ -74,6 +77,7 @@ const ADDR7: u8 = 0b1100_101;
 /// Number of bus errors observed.
 #[used]
 static ERR_BUS: AtomicU32 = AtomicU32::new(0);
+
 /// Number of arbitration lost events.
 #[used]
 static ERR_ARLO: AtomicU32 = AtomicU32::new(0);
@@ -81,12 +85,15 @@ static ERR_ARLO: AtomicU32 = AtomicU32::new(0);
 /// Number of times we detected our address.
 #[used]
 static ADDR_DETECT: AtomicU32 = AtomicU32::new(0);
+
 /// Number of stop conditions we observed (only during our transactions).
 #[used]
 static STOPS: AtomicU32 = AtomicU32::new(0);
+
 /// Number of times we were asked to transmit.
 #[used]
 static TXS: AtomicU32 = AtomicU32::new(0);
+
 /// Number of times we were asked to receive.
 #[used]
 static RXS: AtomicU32 = AtomicU32::new(0);

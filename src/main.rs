@@ -18,6 +18,8 @@
 #![no_std]
 #![no_main]
 
+#![deny(unsafe_op_in_unsafe_fn)]
+
 // The default production config halts on panic, excluding the formatting
 // machinery and saving a solid 7 kiB.
 #[cfg(feature = "panic-halt")]
@@ -26,6 +28,15 @@ extern crate panic_halt;
 // Enable this instead to get nicely formatted panics through your debug probe.
 #[cfg(feature = "panic-semihosting")]
 extern crate panic_semihosting;
+
+/// Clock frequency once clock initialization is complete. To simplify the
+/// implementation, we target this same frequency on both target
+/// microcontrollers, even though the G0 is capable of going considerably faster
+/// than this.
+///
+/// Note that if you change this value, you also need to change the two
+/// `clock_setup` routines to match!
+const CLOCK_HZ: u32 = 48_000_000;
 
 mod serial;
 mod scanner;
@@ -58,6 +69,16 @@ fn main() -> ! {
     // G0: We are currently at 16 MHz on HSI.
     // C0: We are currently at 12 MHz on HSI48/4.
 
+    // For the next bit, we're being very conservative for the benefit of ST's
+    // boot ROM. We will activate that boot ROM if the user requests a firmware
+    // update. It makes assumptions about how the chip is configured, however,
+    // so we need to be careful (1) not to do anything that will break it before
+    // we jump into its code, or alternatively (2) reverse any such changes
+    // before jumping into its code.
+    //
+    // In particular, the boot ROM appears to assume that the reset and clock
+    // trees are in their power-on configuration.
+
     // Turn on the I/O ports we use. If we wind up jumping to the bootloader
     // instead, we'll reverse this.
     rcc.gpioenr().modify(|w| {
@@ -65,6 +86,8 @@ fn main() -> ! {
         w.set_gpioben(true);
         w.set_gpiocen(true);
     });
+    // While technically not necessary on a Cortex-M0, ensure that the write
+    // above happens before any attempt to access the GPIO ports below.
     cortex_m::asm::dsb();
 
     // Switch the two control buttons to pulled-up inputs.
@@ -76,8 +99,12 @@ fn main() -> ! {
         w.set_moder(14, Moder::INPUT); // Update button
         w.set_moder(15, Moder::INPUT); // Setup button
     });
-    // Delay long enough for mode sense pins to charge. TODO: this choice, which
-    // is about 1.25 ms, is somewhat arbitrary.
+
+    // Delay long enough for mode sense pins to charge. The choice of interval
+    // here, which is about 1.25 ms in practice, is somewhat arbitrary. Since
+    // we're just dealing with pad and gate capacitance through the pullups, it
+    // could likely be much shorter -- but thus far nobody has complained that
+    // the product takes 1ms longer to boot than they'd like. ;-)
     cortex_m::asm::delay(20_000);
     // Read mode sense pins.
     let (update_mode, mut setup_mode) = {
@@ -85,15 +112,20 @@ fn main() -> ! {
         (idr.idr(14) == Idr::LOW, idr.idr(15) == Idr::LOW)
     };
 
-    // Go ahead and reset port C. We need to do it before jumping into the
-    // bootloader, and we ought to do it before starting the rest of our work,
-    // so, why not do it here?
+    // Go ahead and reset port C to its boot configuration. We need to do it
+    // before jumping into the bootloader, and we ought to do it before starting
+    // the rest of our work, so, why not do it here?
     gpioc.moder().write_value(device::gpio::regs::Moder(0xFFFFFFFF));
     gpioc.pupdr().write_value(device::gpio::regs::Pupdr(0));
 
-    // Handle update request.
+    // If the update button was being held down, go do that instead. Note that
+    // `do_update` cannot return.
     if update_mode {
-        do_update(cp, rcc);
+        // Safety: we fulfill do_update's contract by calling it at most once,
+        // from main, with interrupts off.
+        unsafe {
+            do_update(cp, rcc);
+        }
     }
 
     // Now we can mess around with machine state to our heart's content, since
@@ -102,7 +134,6 @@ fn main() -> ! {
     //
     // Let's go faster.
     clock_setup();
-    const CLOCK_HZ: u32 = 48_000_000;
 
     // For compactness (in flash) we're going to turn on the peripherals we use
     // here, in one block, instead of in each driver.
@@ -114,7 +145,7 @@ fn main() -> ! {
         w.set_syscfgen(true);
     });
 
-    cortex_m::asm::dsb(); // probably not necessary on M0? Eh, whatev
+    cortex_m::asm::dsb(); // probably not necessary on M0, but, whatever
 
     // Pin configuration:
     //
@@ -130,6 +161,9 @@ fn main() -> ! {
     //
     // PC14: Update button (active low, needs pullup to read)
     // PC15: Setup button (active low, needs pullup to read)
+    //
+    // We've already configured PC14/15, read both buttons, and then
+    // unconfigured them above.
     //
     // NOTE: we do _not_ set pins to output/alternate here because we may want
     // to do tests first.
@@ -162,10 +196,11 @@ fn main() -> ! {
         w.set_moder(8, Moder::OUTPUT);
     });
 
+    // Bring up the flash driver.
     let storage = flash::Storage::new(device::FLASH);
 
     // Ensure that the RAM config goes somewhere I can find in a debugger! i.e.
-    // somewhere with a name, off the stack.
+    // somewhere with a name, not on the stack.
     let cfg = {
         static mut ACTIVE_CONFIG: SystemConfig = SystemConfig::DEFAULT;
         // Safety: we're relying on the fact that this is in main to ensure that
@@ -241,6 +276,7 @@ fn main() -> ! {
     )
 }
 
+/// STM32G0-specific clock setup routine.
 #[cfg(feature = "stm32g030")]
 fn clock_setup() {
     use device::rcc::vals::{Pllsrc, Sw};
@@ -248,8 +284,7 @@ fn clock_setup() {
     let flash = device::FLASH;
     let rcc = device::RCC;
     // We come out of reset at 16 MHz on HSI. We would like to be running at 48
-    // MHz (not 64, because we'd like to simulate the limitations of the
-    // STM32C0).
+    // MHz (not 64, because we're matching the STM32C0 for simplicity).
     //
     // This implies that we need to boost the clock speed by 4 using the PLL.
     //
@@ -317,6 +352,7 @@ fn clock_setup() {
     }
 }
 
+/// STM32C0-specific clock setup routine.
 #[cfg(feature = "stm32c011")]
 fn clock_setup() {
     use device::rcc::vals::Hsidiv;
@@ -342,8 +378,14 @@ fn clock_setup() {
 }
 
 /// Runs ST's program instead of ours.
-fn do_update(cp: cortex_m::Peripherals, rcc: device::rcc::Rcc) -> ! {
-    // Reverse the changes we made to check the button state.
+///
+/// # Safety
+///
+/// To use this safely, call the function zero or one times, from `main`, before
+/// enabling any interrupt sources.
+unsafe fn do_update(cp: cortex_m::Peripherals, rcc: device::rcc::Rcc) -> ! {
+    // Reverse the changes we made to check the button state by turning off the
+    // clock to all GPIO ports.
     rcc.gpioenr().write_value(Gpioenr(0));
 
     // Configure to run the ROM. It appears that the ROM does not require itself
@@ -353,18 +395,36 @@ fn do_update(cp: cortex_m::Peripherals, rcc: device::rcc::Rcc) -> ! {
 
     // Switch the vector table to use the ROM's. TODO: it's not actually clear
     // if the ROM requires this, ST's examples tend not to show it.
+    //
+    // Safety: We're assuming that when this function is called, interrupts
+    // aren't actually on -- so switching the vector table has no impact on
+    // program execution. This is required by the safety contract on do_update
+    // itself.
     unsafe {
         cp.SCB.vtor.write(rom_addr);
     }
+
     // Load the stack pointer and reset vector, in that order, from the ROM.
+    //
+    // Safety: this ROM is mapped at a predictable location that is always
+    // readable and aligned. It would probably be more Ralf-correct if the ROM
+    // were represented as an entity in the linker script, but, hey.
     let stack_pointer = unsafe {
         core::ptr::read_volatile(rom_addr as *const u32)
     };
+    // Safety: same
     let reset_vector = unsafe {
         core::ptr::read_volatile((rom_addr + 4) as *const u32)
     };
 
     // Chain-load.
+    //
+    // Safety: this basically replaces the CPU execution context with the ROM's,
+    // discarding the entire contents of the stack and never returning. This
+    // means, among other things, that any Drop impls for outstanding values
+    // won't be run. That is not a safety issue in Rust since they also won't be
+    // _used._ By permanently terminating the Rust program, this operation winds
+    // up being safe from Rust's perspective.
     unsafe {
         core::arch::asm!("
             mov sp, {stack_pointer}
@@ -382,49 +442,61 @@ fn do_update(cp: cortex_m::Peripherals, rcc: device::rcc::Rcc) -> ! {
     }
 }
 
+/// Do things before Rust-proper wakes up.
 #[pre_init]
 unsafe fn pre_init() {
     // Work around erratum "2.2.5 SRAM write error" where a reset timed _just
     // right_ can cause the first access to an SRAM to be treated as a READ,
     // losing a write.
+    //
+    // Safety: the safety contract for pre_init means we're running before Rust
+    // is alive, we know there's a readable SRAM at the address we use below...
+    // etc.
     #[cfg(feature = "stm32c011")]
-    core::arch::asm!("
-        ldr r0, =0x20000000
-        ldr r0, [r0]
-        ",
-        out("r0") _,
-        options(readonly, preserves_flags, nostack),
-    );
+    unsafe {
+        core::arch::asm!("
+            ldr r0, =0x20000000
+            ldr r0, [r0]
+            ",
+            out("r0") _,
+            options(readonly, preserves_flags, nostack),
+        );
+    }
 
     // Using a pre-init hook here to fill the stack with a recognizable bit
     // pattern, to help my fledgling debugger.
-    core::arch::asm!("
-        @ Linker script marks end of BSS+uninit with __sheap
-        ldr r0, =__sheap
-        @ We'll work down from the current stack pointer,
-        @ _exclusive,_ to avoid corrupting startup state.
-        mov r1, sp
-        ldr r2, =0xDEDEDEDE
+    //
+    // Safety: implicit in the safety contract for pre_init, and we're careful
+    // only to write the portion of stack that is not yet used.
+    unsafe {
+        core::arch::asm!("
+            @ Linker script marks end of BSS+uninit with __sheap
+            ldr r0, =__sheap
+            @ We'll work down from the current stack pointer,
+            @ _exclusive,_ to avoid corrupting startup state.
+            mov r1, sp
+            ldr r2, =0xDEDEDEDE
 
-        @ Bump working pointer down
-    0:  subs r1, #4
-        @ Compare to BSS+uninit end
-        cmp r0, r1
-        @ Exit if we've passed it
-        bhi 1f
-        @ Initialize word
-        str r2, [r1]
-        b 0b
-    1:
-        ",
-        out("r0") _,
-        out("r1") _,
-        out("r2") _,
-        // "readonly" in that we don't write any memory visible to Rust.
-        // "nostack" technically requires that we not write the stack redzone --
-        // if our architecture had one, we'd be writing it, but it does not, and
-        // nostack is required to avoid pushing things to the stack, which would
-        // mess up the C0 erratum fix above.
-        options(readonly, nostack),
-    );
+            @ Bump working pointer down
+        0:  subs r1, #4
+            @ Compare to BSS+uninit end
+            cmp r0, r1
+            @ Exit if we've passed it
+            bhi 1f
+            @ Initialize word
+            str r2, [r1]
+            b 0b
+        1:
+            ",
+            out("r0") _,
+            out("r1") _,
+            out("r2") _,
+            // "readonly" in that we don't write any memory visible to Rust.
+            // "nostack" technically requires that we not write the stack redzone --
+            // if our architecture had one, we'd be writing it, but it does not, and
+            // nostack is required to avoid pushing things to the stack, which would
+            // mess up the C0 erratum fix above.
+            options(readonly, nostack),
+        );
+    }
 }

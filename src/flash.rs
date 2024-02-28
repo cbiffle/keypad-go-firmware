@@ -34,12 +34,27 @@
 //! config.
 //!
 //! From Rust they're `STORAGE_PAGE_A` and `STORAGE_PAGE_B`. If both appear
-//! valid (per the format above) we choose the one with the greater sequence
+//! valid (per the format above) we read from the one with the greater sequence
 //! number. Under normal operation the sequence numbers differ by at most 1, but
 //! the "greater sequence number" comparison is defined using circular
 //! arithmetic, so 1 is considered greater than 255 (for instance).
 //!
+//! On writes, we will write the page that is not being used for reads, or an
+//! arbitrary page if both are invalid.
+//!
 //! The concrete location of the flash storage is chosen in the linker script.
+//!
+//! # Flash and aliasing
+//!
+//! This module **never** generates references into flash, for reading or
+//! writing! All flash access is performed through raw pointers. This is
+//! important, since the way we program flash -- by poking some registers in an
+//! apparently unrelated location in the address space -- causes the contents to
+//! change out from under us. That's generally not ok using either a `&` or
+//! `&mut` reference unless we took the time to model all of flash using
+//! something like `UnsafeCell`.
+//!
+//! Which we haven't. We're just using pointers.
 
 use core::{ptr::addr_of_mut, sync::atomic::{AtomicBool, Ordering}};
 use lilos::atomic::AtomicExt;
@@ -58,8 +73,9 @@ pub struct SystemConfig {
 }
 
 impl SystemConfig {
-    /// `Default` can't be used from a const fn, incl. a static initializer, so,
-    /// here.
+    /// We need to be able to "default" the system config in a static
+    /// initializer, and `Default` itself can't be used in that context yet. So,
+    /// here's a substitute.
     pub const DEFAULT: Self = Self {
         scanner: scanner::Config::DEFAULT,
         keymap: [[0; 8]; 8],
@@ -107,6 +123,7 @@ impl Storage {
         }
 
         extern "C" {
+            // These entities are defined in the linker script.
             static mut STORAGE_PAGE_A: [u64; 256];
             static mut STORAGE_PAGE_B: [u64; 256];
         }
@@ -117,9 +134,10 @@ impl Storage {
                 // Safety: the code above ensures we only get to this point
                 // once, so the &mut won't alias; we happen to know that these
                 // extern "C" variables are not being modified outside of Rust,
-                // so the meaning of &mut won't be violated. Finally, we don't
-                // actually use these as &mut ever, so all this is a little bit
-                // overkill, probably.
+                // so the meaning of &mut won't be violated. Finally, we're
+                // making *mut rather than &mut, so this is all probably a bit
+                // overkill, and I'm not entirely clear on why this use of
+                // addr_of_mut! is unsafe in the first place.
                 unsafe { addr_of_mut!(STORAGE_PAGE_A) },
                 // Safety: same as line above.
                 unsafe { addr_of_mut!(STORAGE_PAGE_B) },
@@ -349,8 +367,10 @@ unsafe fn program(flash: device::flash::Flash, address: *mut u64, source: u64) {
     // write it manually thus:
     let low = source as u32;
     let high = (source >> 32) as u32;
-    core::ptr::write_volatile(address as *mut u32, low);
-    core::ptr::write_volatile((address as *mut u32).add(1), high);
+    unsafe {
+        core::ptr::write_volatile(address as *mut u32, low);
+        core::ptr::write_volatile((address as *mut u32).add(1), high);
+    }
     wait_for_not_busy(flash);
 
     let sr = flash.sr().read();
