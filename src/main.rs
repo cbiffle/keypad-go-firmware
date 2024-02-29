@@ -4,7 +4,7 @@
 
 //! Keyboard scanner firmware entry point.
 //!
-//! # Target architecture
+//! # Target processor
 //!
 //! This firmware supports both STM32G030 and STM32C011 microcontrollers, to
 //! keep costs down. This has introduced some complexity. In cases where you
@@ -14,6 +14,33 @@
 //! Note that these microcontrollers are pretty similar, but are _not_ binary
 //! compatible, so if you flash the build for the wrong chip, things will go
 //! poorly and you'll need a SWD interface to recover.
+//!
+//! # Firmware architecture
+//!
+//! This firmware is designed to support fast keyboard matrix scanning and I2C
+//! target without requiring the two to be all mashed together. (Asynchronous
+//! serial also happens, but doesn't exert all that much influence on the
+//! design.)
+//!
+//! To that end, the firmware is structured as a set of three concurrent tasks,
+//! each of which gets its own module:
+//!
+//! 1. `scanner` scans the keyboard matrix and handles debouncing. Whenever it
+//!    detects a key event, it sends the event into a queue to the `serial`
+//!    task.
+//! 2. `serial` monitors the event queue from `scanner` and immediately sends
+//!    events out over asynchronous serial. Because there's no way for an
+//!    outside entity to prevent us from sending events over serial, the queue
+//!    from `scanner` can't overflow in practice. `serial` also forward events
+//!    into a _second_ queue to `i2c`.
+//! 3. `i2c` implements an I2C target interface, allowing an external processor
+//!    to read key events at their leisure. Because this interface is
+//!    fundamentally under the control of an outside entity, the queue from
+//!    `serial` to `i2c` _can_ fill up, which is indicated to the external
+//!    processor as an overflow that may have dropped events.
+//!
+//! Here in `main` we're responsible for doing global setup, clocks, etc., and
+//! allocating the queues discussed above.
 
 #![no_std]
 #![no_main]

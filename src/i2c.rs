@@ -10,10 +10,11 @@
 //!
 //! The I2C driver receives fully processed 8-bit key event bytes from the
 //! serial task. This centralizes key processing in one place (serial). Because
-//! the serial task's interface (the serial port) is asynchronous without flow
-//! control, and thus always has permission to transmit, that task can always
-//! process a key promptly -- whereas the I2C task only speaks when asked by the
-//! host. So, the serial task drives and we listen.
+//! the serial task always has "permission" to transmit (it does not have to
+//! coordinate with any external entity to send on the serial port), and thus
+//! always has permission to transmit, that task can always process a key
+//! promptly -- whereas the I2C task (hi!) only speaks when asked by the host.
+//! So, the serial task drives and we listen.
 //!
 //! The queue coming from the serial task *is* the outstanding key buffer. We
 //! pop from it only when the host asks us to, and otherwise leave it alone. If
@@ -47,20 +48,27 @@
 //! more hand-holding than the more pipelined modes, but keeps us from having to
 //! track additional state. It does imply slightly more clock stretching than
 //! would be ideal, but in practice we don't stretch much.
+//!
+//! Before you attempt to switch the peripheral out of byte control mode to
+//! reduce the clock stretching, keep this in mind: running it in any other mode
+//! makes it a hard realtime interface, because the peripheral presents narrow
+//! windows of time in which a response must be prepared before it goes ahead
+//! and speaks nonsense -- and those windows often happen _one byte earlier_
+//! than you would normally expect!
 
 use core::convert::Infallible;
 use core::sync::atomic::{AtomicU32, Ordering};
+use futures::{select_biased, FutureExt as _};
+use lilos::atomic::AtomicArithExt;
+use lilos::exec::Notify;
+use lilos::spsc;
+use lilos::util::FutureExt;
 
 use crate::device;
 
 use device::gpio::vals::Moder;
 use device::i2c::vals::{Addmode, Reload, Dir};
 use device::interrupt;
-use futures::{select_biased, FutureExt as _};
-use lilos::atomic::AtomicArithExt;
-use lilos::exec::Notify;
-use lilos::util::FutureExt;
-use lilos::spsc;
 
 /// Our address, expressed as a 7-bit binary number. This corresponds to the I2C
 /// address byte with the read/write bit missing, and is (IMO) the least
@@ -72,8 +80,9 @@ const ADDR7: u8 = 0b1100_101;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Event counters. These are written from the application but are intended for
-// consumption by a debugger, so they appear to never be read. Thus, each should
-// carry the #[used] attribute.
+// consumption by a debugger, so they appear (from inspection of the code, and
+// from rustc) to never be read. Thus, each should carry the #[used] attribute
+// to ensure it makes it into the firmware.
 
 /// Number of bus errors observed.
 #[used]
