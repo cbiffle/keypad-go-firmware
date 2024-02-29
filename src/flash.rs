@@ -167,11 +167,10 @@ impl Storage {
     ///    page.
     /// 3. If no config is present, this will use page A.
     pub fn write_config(&mut self, src: &SystemConfig) {
-        let (i, serial) = match self.active() {
-            Some(result) => result,
+        let (i, serial) = self.active().unwrap_or(
             // Choose page A and set "previous serial" to FF, so we start at 0.
-            None => (0, 0xFF),
-        };
+            (0, 0xFF)
+        );
         // Flip to other page.
         let i = i ^ 1;
         // Advance the serial.
@@ -182,11 +181,11 @@ impl Storage {
 
         // If debug assertions are enabled, check the properties our linker
         // script is supposed to ensure.
-        debug_assert!(page_offset >= 28 * 1024 && page_offset < 32 * 1024);
+        debug_assert!((28 * 1024..32 * 1024).contains(&page_offset));
         debug_assert!(page_offset & 0x7FF == 0);
 
         let page_index = u8::try_from(page_offset >> 11).unwrap();
-        let header = 0xCEEBAD01_0000_0000
+        let header = 0xCEEB_AD01_0000_0000
             | u64::from(src.scanner.driven_lines)
             | u64::from(serial) << 8;
 

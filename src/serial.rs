@@ -77,6 +77,7 @@ type Uart = device::usart::Usart;
 ///
 /// Finally, after startup we own `storage` so we can rewrite flash during setup
 /// mode.
+#[allow(clippy::too_many_arguments)] // lots of dependencies to inject
 pub async fn task(
     uart: Uart,
     gpioa: device::gpio::Gpio,
@@ -154,7 +155,7 @@ fn init(gpioa: device::gpio::Gpio, uart: Uart) {
 ///
 /// Thin wrapper around the slice transmit routine, which gets called in many
 /// more places.
-fn transmit_byte<'a>(uart: Uart, byte: &'a u8) -> impl Future<Output = ()> + 'a {
+fn transmit_byte(uart: Uart, byte: &u8) -> impl Future<Output = ()> + '_ {
     transmit(uart, from_ref(byte))
 }
 
@@ -283,33 +284,25 @@ fn USART1() {
 
     let mut bits_to_clear = 0;
 
-    if cr1.txeie() {
-        if isr.txe() {
-            TX_AVAIL.notify();
-            bits_to_clear |= 1 << 7;
-        }
+    if cr1.txeie() && isr.txe() {
+        TX_AVAIL.notify();
+        bits_to_clear |= 1 << 7;
     }
-    if cr1.tcie() {
-        if isr.tc() {
-            TX_COMPLETE.notify();
-            bits_to_clear |= 1 << 6;
-        }
+    if cr1.tcie() && isr.tc() {
+        TX_COMPLETE.notify();
+        bits_to_clear |= 1 << 6;
     }
 
     let mut notify_rx = false;
-    if cr3.eie() {
-        if isr.ore() || isr.fe() || isr.ne() {
-            notify_rx = true;
-            // This is the only bit we clear in CR3, so go ahead and do it
-            // instead of combining writes.
-            uart.cr3().modify(|w| w.set_eie(false));
-        }
+    if cr3.eie() && (isr.ore() || isr.fe() || isr.ne()) {
+        notify_rx = true;
+        // This is the only bit we clear in CR3, so go ahead and do it
+        // instead of combining writes.
+        uart.cr3().modify(|w| w.set_eie(false));
     }
-    if cr1.rxneie() {
-        if isr.rxne() {
-            notify_rx = true;
-            bits_to_clear |= 1 << 5;
-        }
+    if cr1.rxneie() && isr.rxne() {
+        notify_rx = true;
+        bits_to_clear |= 1 << 5;
     }
 
     if notify_rx {

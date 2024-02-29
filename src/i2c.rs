@@ -67,6 +67,7 @@ use lilos::spsc;
 /// ambiguous way of expressing such an address.
 ///
 /// TODO: it'd be great for this to be online-programmable, stored in flash.
+#[allow(clippy::unusual_byte_groupings)] // Deliberately written in 4_3
 const ADDR7: u8 = 0b1100_101;
 
 ///////////////////////////////////////////////////////////////////////////////

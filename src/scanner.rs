@@ -181,6 +181,12 @@ pub async fn task(
             // Handle any "killed" keys. This occurs when the key's bit in the
             // `ghost_mask` was not set before, but has become set. As in the
             // killed line case, we need to reset its debouncer state.
+            //
+            // This is written using a range and indexing because, believe it or
+            // not, enumerate generates much larger code -- at least as of
+            // 1.75.0. This is because we're at opt-level="z", which makes dumb
+            // decisions like "not inlining the enumerate iterator for slices."
+            #[allow(clippy::needless_range_loop)]
             for line in 0..8 {
                 for col in 0..8 {
                     let col_mask = 1 << col;
@@ -201,7 +207,12 @@ pub async fn task(
         // live.
         let down_mask = scan(config, gpio).await;
 
-        // Process each potential key in the grid.
+        // Process each potential key in the grid. This is written using a range
+        // and indexing because, believe it or not, enumerate generates much
+        // larger code -- at least as of 1.75.0. This is because we're at
+        // opt-level="z", which makes dumb decisions like "not inlining the
+        // enumerate iterator for slices."
+        #[allow(clippy::needless_range_loop)]
         for line in 0..8 {
             for col in 0..8 {
                 let s = if down_mask & (1 << (8 * line + col)) != 0 {
