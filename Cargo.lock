@@ -18,6 +18,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "46afbd2983a5d5a7bd740ccb198caf5b82f45c40c09c0eed36052d91cb92e719"
 
 [[package]]
+name = "cfg-if"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
+
+[[package]]
 name = "cortex-m"
 version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -157,10 +163,10 @@ dependencies = [
 
 [[package]]
 name = "lilos"
-version = "0.3.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23f903cdd21f2e62eb2e1eea677bd65cdff8808fa0949da130e68cf8f84a9068"
+version = "1.0.0-pre.0"
+source = "git+https://github.com/cbiffle/lilos/#97c581b468d2cae179b9334a62d542592af40ccd"
 dependencies = [
+ "cfg-if",
  "cortex-m",
  "cortex-m-rt",
  "pin-project-lite",

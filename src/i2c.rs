@@ -116,7 +116,7 @@ pub async fn task(
     rcc: device::rcc::Rcc,
     gpiob: device::gpio::Gpio,
     i2c: device::i2c::I2c,
-    mut bytes_from_serial: spsc::Pop<'_, u8>,
+    mut bytes_from_serial: spsc::Popper<'_, u8>,
 ) -> Infallible {
     init(rcc, i2c, gpiob);
 
@@ -185,7 +185,7 @@ pub async fn task(
 /// cancellation of its future to end transmission.
 async fn handle_data(
     i2c: device::i2c::I2c,
-    bytes_from_serial: &mut spsc::Pop<'_, u8>,
+    bytes_from_serial: &mut spsc::Popper<'_, u8>,
 ) -> ! {
     // Determine the direction of the transfer.
     match i2c.isr().read().dir() {
@@ -248,7 +248,7 @@ async fn receive_data(i2c: device::i2c::I2c) -> ! {
 /// outgoing data transfer needs to naturally pad itself with ... something.
 async fn transmit_data(
     i2c: device::i2c::I2c,
-    bytes_from_serial: &mut spsc::Pop<'_, u8>,
+    bytes_from_serial: &mut spsc::Popper<'_, u8>,
 ) -> ! {
     loop {
         // Ensure we find out if we need to transmit another byte.

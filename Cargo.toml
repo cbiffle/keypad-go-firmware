@@ -19,9 +19,10 @@ panic-semihosting = {optional = true, version = "0.6.0"}
 scopeguard = { version = "1.1.0", default-features = false }
 
 [dependencies.lilos]
-version = "0.3.6"
+version = "1.0.0-pre.0"
 default-features = false
 features = ["spsc", "systick", "mutex", "handoff"]
+git = "https://github.com/cbiffle/lilos/"
 
 [dependencies.stm32-metapac]
 default-features = false
