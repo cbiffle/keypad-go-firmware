@@ -164,8 +164,9 @@ dependencies = [
 
 [[package]]
 name = "lilos"
-version = "1.0.0-pre.0"
-source = "git+https://github.com/cbiffle/lilos/#24c26223b12979fa27c5bcc6efd7adc63e9fc769"
+version = "1.0.0-pre.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a8b17d922e7ceeb6f07e65b8986b935c9a6a026d01411a4c0ac45c2d52929be"
 dependencies = [
  "cfg-if",
  "cortex-m",
@@ -175,8 +176,9 @@ dependencies = [
 
 [[package]]
 name = "lilos-handoff"
-version = "1.0.0-pre.0"
-source = "git+https://github.com/cbiffle/lilos/#24c26223b12979fa27c5bcc6efd7adc63e9fc769"
+version = "1.0.0-pre.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3905fe847a18142e9d97d9f2e1629b29f75e31fde4d12c703fdd7071599ddd58"
 dependencies = [
  "lilos",
  "scopeguard",
