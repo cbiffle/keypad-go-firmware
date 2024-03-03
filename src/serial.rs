@@ -42,7 +42,7 @@ use core::slice::from_ref;
 
 use device::{gpio::vals::Moder, usart::vals::Stop};
 use futures::{Future, select_biased, FutureExt};
-use lilos::{exec::Notify, handoff, spsc, time::{Millis, with_timeout, sleep_for}};
+use lilos::{exec::Notify, spsc, time::{Millis, with_timeout, sleep_for}};
 
 use crate::{device::{self, interrupt}, scanner::{KeyState, self}, flash::{Storage, SystemConfig}};
 
@@ -84,7 +84,7 @@ pub async fn task(
     keymap: &[[u8; 8]; 8],
     setup_mode: bool,
     mut from_scanner: spsc::Popper<'_, scanner::KeyEvent>,
-    config_to_scanner: handoff::Pusher<'_, scanner::Config>,
+    config_to_scanner: lilos_handoff::Pusher<'_, scanner::Config>,
     mut bytes_to_i2c: spsc::Pusher<'_, u8>,
     storage: Storage,
 ) -> Infallible {
@@ -343,7 +343,7 @@ const SETTLE: Millis = Millis(100);
 /// so, during setup the I2C port will be dead.
 async fn setup(
     uart: Uart,
-    mut config_to_scanner: handoff::Pusher<'_, scanner::Config>,
+    mut config_to_scanner: lilos_handoff::Pusher<'_, scanner::Config>,
     mut from_scanner: lilos::spsc::Popper<'_, scanner::KeyEvent>,
     mut storage: Storage,
 ) -> Infallible {

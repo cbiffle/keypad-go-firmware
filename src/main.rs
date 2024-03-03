@@ -76,7 +76,7 @@ use stm32_metapac as device;
 use core::{mem::MaybeUninit, pin::pin};
 use cortex_m_rt::pre_init;
 use device::{gpio::vals::{Pupdr, Moder, Idr}, rcc::regs::Gpioenr, flash::vals::Latency, syscfg::vals::MemMode};
-use lilos::{handoff::Handoff, spsc::Queue};
+use lilos::spsc::Queue;
 
 use crate::flash::SystemConfig;
 
@@ -252,7 +252,7 @@ fn main() -> ! {
 
     // Allocate the serial-to-scanner synchronous config handoff (no storage
     // required)
-    let mut config_handoff = Handoff::new();
+    let mut config_handoff = lilos_handoff::Handoff::new();
     let (config_to_scanner, config_from_serial) = config_handoff.split();
 
     // Allocate the serial-to-I2C byte queue, also on the stack.

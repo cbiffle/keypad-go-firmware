@@ -21,7 +21,11 @@ scopeguard = { version = "1.1.0", default-features = false }
 [dependencies.lilos]
 version = "1.0.0-pre.0"
 default-features = false
-features = ["spsc", "systick", "mutex", "handoff"]
+features = ["spsc", "systick", "mutex"]
+git = "https://github.com/cbiffle/lilos/"
+
+[dependencies.lilos-handoff]
+version = "1.0.0-pre.0"
 git = "https://github.com/cbiffle/lilos/"
 
 [dependencies.stm32-metapac]

@@ -62,7 +62,7 @@ use core::sync::atomic::{Ordering, AtomicBool};
 
 use device::gpio::vals::{Ot, Pupdr, Moder};
 use lilos::atomic::AtomicExt;
-use lilos::{handoff, spsc};
+use lilos::spsc;
 use lilos::time::{TickTime, Millis, PeriodicGate};
 
 use crate::device;
@@ -150,7 +150,7 @@ pub enum KeyState { #[default] Up, Down }
 /// emit events through `out_queue`.
 pub async fn task(
     mut config: Config,
-    mut config_update: handoff::Popper<'_, Config>,
+    mut config_update: lilos_handoff::Popper<'_, Config>,
     gpio: device::gpio::Gpio,
     mut out_queue: spsc::Pusher<'_, KeyEvent>,
 ) -> Infallible {
