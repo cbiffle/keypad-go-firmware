@@ -28,3 +28,6 @@ cd $REL
 zip firmware.zip *
 cd -
 mv $REL/firmware.zip keypad-go-firmware-$VERSION.zip
+
+echo "Image sizes:"
+ls -l $REL/*.bin
