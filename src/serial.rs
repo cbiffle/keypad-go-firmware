@@ -364,12 +364,14 @@ async fn setup(
         ghost_mask: [0; 8],
     }).await;
 
-    transmit_v(uart, &[
-        b"\r\n\r\nSETUP MODE\r\n",
-        b"Firmware version: ",
-        env!("CARGO_PKG_VERSION").as_bytes(),
-        b"\r\n\r\n",
-    ]).await;
+    transmit(uart, concat!(
+        "\r\n\
+         \r\n\
+         SETUP MODE\r\n\
+         Firmware version: ",
+        env!("CARGO_PKG_VERSION"),
+        "\r\n\r\n",
+    ).as_bytes()).await;
 
     // Keymap we're maintaining. Holds an ASCII character per matrix
     // intersection, or 0 if not yet configured.
