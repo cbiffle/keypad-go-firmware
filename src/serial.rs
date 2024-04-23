@@ -38,7 +38,7 @@
 //! which is the goal.
 
 use core::convert::Infallible;
-use core::slice::from_ref;
+use core::slice;
 
 use device::{gpio::vals::Moder, usart::vals::Stop};
 use futures::{Future, select_biased, FutureExt};
@@ -156,7 +156,7 @@ fn init(gpioa: device::gpio::Gpio, uart: Uart) {
 /// Thin wrapper around the slice transmit routine, which gets called in many
 /// more places.
 fn transmit_byte(uart: Uart, byte: &u8) -> impl Future<Output = ()> + '_ {
-    transmit(uart, from_ref(byte))
+    transmit(uart, slice::from_ref(byte))
 }
 
 /// Slice transmit routine.
@@ -437,14 +437,14 @@ async fn setup(
         for (i, &mask) in connectivity.iter().enumerate() {
             if mask != 0 {
                 transmit_v(uart, &[
-                    from_ref(&pin_digit(i as u8)),
+                    slice::from_ref(&pin_digit(i as u8)),
                     b" ->",
                 ]).await;
                 for col in 0..8 {
                     if mask & (1 << col) != 0 {
                         transmit_v(uart, &[
                             b" ",
-                            from_ref(&pin_digit(col as u8)),
+                            slice::from_ref(&pin_digit(col as u8)),
                             if first_path.is_none() {
                                 first_path = Some((i, col));
                                 b"*"
@@ -506,7 +506,7 @@ async fn setup(
         keys[first_path.0][first_path.1] = entered_char;
         // Key echo makes for happier users.
         transmit_v(uart, &[
-            from_ref(&entered_char),
+            slice::from_ref(&entered_char),
             b"\r\nOK\r\n\r\n",
         ]).await;
     }
@@ -522,7 +522,7 @@ async fn setup(
             driven_lines |= 1 << p;
             transmit_v(uart, &[
                 b"drive ",
-                from_ref(&pin_digit(p)),
+                slice::from_ref(&pin_digit(p)),
                 b"\r\n",
             ]).await;
             for col in 0..8 {
@@ -534,9 +534,9 @@ async fn setup(
 
                     transmit_v(uart, &[
                         b" - sense ",
-                        from_ref(&pin_digit(col)),
+                        slice::from_ref(&pin_digit(col)),
                         b" => '",
-                        from_ref(&k),
+                        slice::from_ref(&k),
                         b"'\r\n",
                     ]).await;
                 }
@@ -591,7 +591,7 @@ async fn setup(
                 KeyState::Down => b"down: ",
                 KeyState::Up => b"up:   ",
             },
-            from_ref(&keys[evt.driven_line()][evt.sensed_line()]),
+            slice::from_ref(&keys[evt.driven_line()][evt.sensed_line()]),
             b"\r\n",
         ]).await;
     }
