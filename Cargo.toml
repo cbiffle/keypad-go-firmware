@@ -1,6 +1,6 @@
 [package]
 name = "keybad-fw"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2021"
 
 [features]
@@ -19,12 +19,12 @@ panic-semihosting = {optional = true, version = "0.6.0"}
 scopeguard = { version = "1.1.0", default-features = false }
 
 [dependencies.lilos]
-version = "1.0.0-pre.2"
+version = "1.0.0"
 default-features = false
 features = ["spsc", "systick", "mutex"]
 
 [dependencies.lilos-handoff]
-version = "1.0.0-pre.1"
+version = "1.0.0"
 
 [dependencies.stm32-metapac]
 default-features = false
