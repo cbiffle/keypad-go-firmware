@@ -66,11 +66,6 @@ extern crate panic_semihosting;
 /// `clock_setup` routines to match!
 const CLOCK_HZ: u32 = 48_000_000;
 
-/// Number of events in the scanner-to-serial queue.
-const SCAN_EVENT_Q_DEPTH: usize = 16;
-/// Number of bytes stored on the I2C interface.
-const I2C_Q_DEPTH: usize = 64;
-
 mod serial;
 mod scanner;
 mod flash;
@@ -91,6 +86,30 @@ use crate::util::StaticResource;
 /// somewhere with a name, not on the stack.
 static ACTIVE_CONFIG: StaticResource<SystemConfig> =
     StaticResource::new(SystemConfig::DEFAULT);
+
+/// Storage for bytes waiting to be evacuated over the I2C interface. Static so
+/// that I can adjust its size freely without fear of a stack overflow.
+///
+/// "64" is tunable here and was chosen somewhat arbitrarily.
+///
+/// The size is +1 because it's used for a Lamport queue, which requires n+1
+/// elements of storage.
+static I2C_Q: StaticResource<[MaybeUninit<u8>; 64 + 1]> =
+    StaticResource::new([MaybeUninit::uninit(); 64 + 1]);
+
+/// Storage for events produced by the scanner, waiting for collection by the
+/// serial task. In theory this can receive one event for every defined key,
+/// each scan cycle. We can only emit about 2 events on the serial port per scan
+/// cycle, so on a keyboard with >2 keys this could theoretically overflow.
+///
+/// However, in practice, the debouncing interval in the scanner limits how
+/// often this can occur and gives us time to evacuate the queue for most
+/// realistic scenarios.
+///
+/// The size is +1 because it's used for a Lamport queue, which requires n+1
+/// elements of storage.
+static SCAN_EVENT_Q: StaticResource<[MaybeUninit<scanner::KeyEvent>; 16 + 1]> =
+    StaticResource::new([MaybeUninit::uninit(); 16 + 1]);
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
@@ -252,8 +271,7 @@ fn main() -> ! {
     // Allocate the scanner-to-serial event queue. Small enough that I'm just
     // putting it on the stack. This is +1 because it's a Lamport queue and we
     // need one element to serve as sentinel.
-    let mut scan_event_storage = [MaybeUninit::uninit(); SCAN_EVENT_Q_DEPTH + 1];
-    let mut scan_event_q = pin!(Queue::new(&mut scan_event_storage));
+    let mut scan_event_q = pin!(Queue::new(SCAN_EVENT_Q.take()));
     let (scan_event_from_scanner, scan_event_to_serial) = scan_event_q.split();
 
     // Allocate the serial-to-scanner synchronous config handoff (no storage
@@ -261,11 +279,8 @@ fn main() -> ! {
     let mut config_handoff = lilos_handoff::Handoff::new();
     let (config_to_scanner, config_from_serial) = config_handoff.split();
 
-    // Allocate the serial-to-I2C byte queue, also on the stack. This is +1
-    // because it's a Lamport queue and we need one element to serve as
-    // sentinel.
-    let mut i2c_byte_storage = [MaybeUninit::uninit(); I2C_Q_DEPTH + 1];
-    let mut i2c_byte_q = pin!(Queue::new(&mut i2c_byte_storage));
+    // Create the serial-to-I2C byte queue using static storage.
+    let mut i2c_byte_q = pin!(Queue::new(I2C_Q.take()));
     let (i2c_byte_from_serial, i2c_byte_to_i2c) = i2c_byte_q.split();
 
     let serial_task = pin!(serial::task(
