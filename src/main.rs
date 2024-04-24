@@ -48,6 +48,8 @@
 // Change some language settings that should really be the default but aren't.
 #![deny(unsafe_op_in_unsafe_fn, elided_lifetimes_in_paths)]
 
+#![deny(clippy::undocumented_unsafe_blocks)]
+
 // The default production config halts on panic, excluding the formatting
 // machinery and saving a solid 7 kiB.
 #[cfg(feature = "panic-halt")]

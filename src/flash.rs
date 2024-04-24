@@ -176,6 +176,8 @@ impl Storage {
         // Advance the serial.
         let serial = serial.wrapping_add(1);
 
+        // SAFETY ASSUMPTION: self.pages[i] contains a valid pointer that points
+        // to 11 (64-bit) words of accessible flash memory.
         let base = self.pages[i] as *mut u64;
         let page_offset = (base as u32).wrapping_sub(0x08000000);
 
@@ -193,16 +195,25 @@ impl Storage {
 
         page_erase(self.flash, page_index);
         enable_programming(self.flash);
+        // Program the header and mask word.
+        //
+        // Safety: follows from our assumptions about base, above.
         unsafe {
             program(self.flash, base, header);
             program(self.flash, base.add(1), u64::from_le_bytes(src.scanner.ghost_mask));
         }
         for (i, chunk) in src.keymap.iter().enumerate() {
             let word = u64::from_le_bytes(*chunk);
+            // Safety: keymap.len()==8, so this accesses offsets 2..=9 past
+            // base, which are valid.
             unsafe {
                 program(self.flash, base.add(2 + i), word);
             }
         }
+        // Write the trailing copy of the header.
+        //
+        // Safety: follows from our assumption that base through base+10 are
+        // valid.
         unsafe {
             program(self.flash, base.add(10), header);
         }
@@ -214,6 +225,8 @@ impl Storage {
     /// or 1.
     fn read_config(&self, i: usize, out: &mut SystemConfig) {
         let base = self.pages[i] as *mut u64;
+        // Safety: we are confident that self.pages[i] is a valid pointer for
+        // all i.
         let (header, mask) = unsafe {
             (
                 core::ptr::read_volatile(base),
@@ -224,6 +237,9 @@ impl Storage {
         out.scanner.ghost_mask = mask.to_le_bytes();
 
         for (i, chunk) in out.keymap.iter_mut().enumerate() {
+            // Safety: keymap.len() == 8, so this will read words at offsets
+            // 2..=9. These offsets are well-defined in this format, and since
+            // we know self.pages[i] is valid, we're good.
             let map_word = unsafe {
                 core::ptr::read_volatile(base.add(2 + i))
             };
@@ -252,6 +268,8 @@ impl Storage {
     /// Loads the serial number from a given slot.
     fn serial(&self, i: usize) -> Option<u8> {
         let base = self.pages[i] as *mut u64;
+        // Safety: we are confident that self.pages[i] is a valid pointer for
+        // all i.
         let (header, trailer) = unsafe {
             (
                 core::ptr::read_volatile(base),
@@ -366,6 +384,8 @@ unsafe fn program(flash: device::flash::Flash, address: *mut u64, source: u64) {
     // write it manually thus:
     let low = source as u32;
     let high = (source >> 32) as u32;
+    // Safety: the requirements of write_volatile are satisfied because we
+    // included it by reference in this function's safety contract.
     unsafe {
         core::ptr::write_volatile(address as *mut u32, low);
         core::ptr::write_volatile((address as *mut u32).add(1), high);

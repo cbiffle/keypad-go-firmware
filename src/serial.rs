@@ -146,6 +146,11 @@ fn init(gpioa: device::gpio::Gpio, uart: Uart) {
         w.set_ue(true);
     });
 
+    // Safety: this operation is unsafe because, in systems that use interrupt
+    // masking to provide concurrency control, this can cause an unexpected
+    // change of control flow. The way we use lilos, we're using a global
+    // interrupt mask to order events, so this operation winds up being safe in
+    // all contexts.
     unsafe {
         cortex_m::peripheral::NVIC::unmask(device::Interrupt::USART1);
     }
