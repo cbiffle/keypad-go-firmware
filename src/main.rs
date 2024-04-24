@@ -92,12 +92,13 @@ static ACTIVE_CONFIG: StaticResource<SystemConfig> =
 /// Storage for bytes waiting to be evacuated over the I2C interface. Static so
 /// that I can adjust its size freely without fear of a stack overflow.
 ///
-/// "64" is tunable here and was chosen somewhat arbitrarily.
+/// "128" is tunable here and was chosen somewhat arbitrarily as "big enough for
+/// all practical purposes" while not excessively consuming our limited RAM.
 ///
 /// The size is +1 because it's used for a Lamport queue, which requires n+1
 /// elements of storage.
-static I2C_Q: StaticResource<[MaybeUninit<u8>; 64 + 1]> =
-    StaticResource::new([MaybeUninit::uninit(); 64 + 1]);
+static I2C_Q: StaticResource<[MaybeUninit<u8>; 128 + 1]> =
+    StaticResource::new([MaybeUninit::uninit(); 128 + 1]);
 
 /// Storage for events produced by the scanner, waiting for collection by the
 /// serial task. In theory this can receive one event for every defined key,
