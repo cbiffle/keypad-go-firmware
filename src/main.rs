@@ -75,6 +75,7 @@ mod serial;
 mod scanner;
 mod flash;
 mod i2c;
+mod util;
 
 use stm32_metapac as device;
 
@@ -84,6 +85,12 @@ use device::{gpio::vals::{Pupdr, Moder, Idr}, rcc::regs::Gpioenr, flash::vals::L
 use lilos::spsc::Queue;
 
 use crate::flash::SystemConfig;
+use crate::util::StaticResource;
+
+/// Ensure that the RAM config goes somewhere I can find in a debugger! i.e.
+/// somewhere with a name, not on the stack.
+static ACTIVE_CONFIG: StaticResource<SystemConfig> =
+    StaticResource::new(SystemConfig::DEFAULT);
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
@@ -232,15 +239,8 @@ fn main() -> ! {
     // Bring up the flash driver.
     let storage = flash::Storage::new(device::FLASH);
 
-    // Ensure that the RAM config goes somewhere I can find in a debugger! i.e.
-    // somewhere with a name, not on the stack.
-    let cfg = {
-        static mut ACTIVE_CONFIG: SystemConfig = SystemConfig::DEFAULT;
-        // Safety: we're relying on the fact that this is in main to ensure that
-        // it only gets executed once. That is not a spectacularly robust
-        // approach to this, but it has the advantage of being essentially free.
-        unsafe { &mut ACTIVE_CONFIG }
-    };
+    let cfg = ACTIVE_CONFIG.take();
+
     // Attempt to override the default config with what we find in flash. If we
     // find nothing in flash, force `setup_mode` to true.
     setup_mode |= !storage.load_active_config(cfg);

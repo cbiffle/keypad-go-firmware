@@ -58,17 +58,23 @@
 //! - Fancy keypad with diodes: 56 keys.
 
 use core::convert::Infallible;
-use core::sync::atomic::{Ordering, AtomicBool};
 
 use device::gpio::vals::{Ot, Pupdr, Moder};
-use lilos::atomic::AtomicExt;
 use lilos::spsc;
 use lilos::time::{TickTime, Millis, PeriodicGate};
 
 use crate::device;
+use crate::util::StaticResource;
 
 /// Wanna alter the scan interval? Well here it is.
 const SCAN_INTERVAL: Millis = Millis(1);
+
+/// Debouncers are kept in static RAM because (1) they're relatively large and
+/// might be a surprising thing to find on the stack, and (2) this way they're
+/// easily visible in a debugger.
+static DEBOUNCERS: StaticResource<[[Debounce; 8]; 8]> = StaticResource::new(
+    [[Debounce::DEFAULT; 8]; 8]
+);
 
 /// Scanner configuration state.
 #[derive(Copy, Clone, Debug)]
@@ -156,7 +162,7 @@ pub async fn task(
 ) -> Infallible {
     configure_pins(gpio);
 
-    let debouncers = take_debouncers();
+    let debouncers = DEBOUNCERS.take();
     let mut scan_gate = PeriodicGate::from(SCAN_INTERVAL);
     loop {
         scan_gate.next_time().await;
@@ -236,22 +242,6 @@ pub async fn task(
             }
         }
 
-    }
-}
-
-/// Allocate and initialize the static debouncer array using the First Mover
-/// Allocator pattern.
-fn take_debouncers() -> &'static mut [[Debounce; 8]; 8] {
-    static DEBOUNCERS_TAKEN: AtomicBool = AtomicBool::new(false);
-    if DEBOUNCERS_TAKEN.swap_polyfill(true, Ordering::SeqCst) {
-        panic!();
-    }
-    {
-        static mut DEBOUNCERS: [[Debounce; 8]; 8] = [[Debounce::DEFAULT; 8]; 8];
-        // Safety: we can safely get an exclusive reference to this static
-        // because (1) it's scoped to this function and (2) the code above
-        // ensures that we only get to this point in the function once.
-        unsafe { &mut DEBOUNCERS }
     }
 }
 
