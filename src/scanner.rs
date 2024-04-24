@@ -286,7 +286,15 @@ struct Debounce {
 
 impl Debounce {
     /// How long a key is required to be stable before we commit to it.
-    const PERIOD: Millis = Millis(5);
+    ///
+    /// This also serves to limit the maximum frequency of events emitted by the
+    /// scanner, and was chosen to be somewhat larger than
+    ///
+    ///     16 * BITS_PER_FRAME / 19_200
+    ///
+    /// ...where `BITS_PER_FRAME` is 11. This ensures that one deboucing
+    /// interval is long enough to emit 16 key events on the serial interface.
+    const PERIOD: Millis = Millis(10);
 
     /// Default const for static initializers.
     const DEFAULT: Self = Self {
