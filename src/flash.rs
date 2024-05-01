@@ -61,6 +61,28 @@ use lilos::atomic::AtomicExt;
 
 use crate::{device, scanner};
 
+/// Designates a slot in our two-slot flash storage scheme.
+///
+/// Yes, this is a glorified `bool`, but with much clearer names.
+#[derive(Copy, Clone, Eq, PartialEq, Default)]
+pub enum Slot {
+    #[default]
+    Zero = 0,
+    One = 1,
+}
+
+/// Being cute and using operator overloading of `!` to flip slots.
+impl core::ops::Not for Slot {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        match self {
+            Slot::Zero => Slot::One,
+            Slot::One => Slot::Zero,
+        }
+    }
+}
+
 /// RAM representation of the configuration we store in Flash. This isn't
 /// represented the same way as Flash because we don't generate direct
 /// references to config pages in Flash (for aliasing reasons).
@@ -167,18 +189,18 @@ impl Storage {
     ///    page.
     /// 3. If no config is present, this will use page A.
     pub fn write_config(&mut self, src: &SystemConfig) {
-        let (i, serial) = self.active().unwrap_or(
+        let (slot, serial) = self.active().unwrap_or(
             // Choose page A and set "previous serial" to FF, so we start at 0.
-            (0, 0xFF)
+            (Slot::Zero, 0xFF)
         );
         // Flip to other page.
-        let i = i ^ 1;
+        let slot = !slot;
         // Advance the serial.
         let serial = serial.wrapping_add(1);
 
         // SAFETY ASSUMPTION: self.pages[i] contains a valid pointer that points
         // to 11 (64-bit) words of accessible flash memory.
-        let base = self.pages[i] as *mut u64;
+        let base = self.pages[slot as usize] as *mut u64;
         let page_offset = (base as u32).wrapping_sub(0x08000000);
 
         // If debug assertions are enabled, check the properties our linker
@@ -223,8 +245,8 @@ impl Storage {
 
     /// Reads a specific config index `i` into `out`. The index must be either 0
     /// or 1.
-    fn read_config(&self, i: usize, out: &mut SystemConfig) {
-        let base = self.pages[i] as *mut u64;
+    fn read_config(&self, slot: Slot, out: &mut SystemConfig) {
+        let base = self.pages[slot as usize] as *mut u64;
         // Safety: we are confident that self.pages[i] is a valid pointer for
         // all i.
         let (header, mask) = unsafe {
@@ -249,25 +271,25 @@ impl Storage {
 
     /// Determines which slot is active, and returns its serial number that was
     /// found to be the larger of the two.
-    fn active(&self) -> Option<(usize, u8)> {
-        match (self.serial(0), self.serial(1)) {
+    fn active(&self) -> Option<(Slot, u8)> {
+        match (self.serial(Slot::Zero), self.serial(Slot::One)) {
             (Some(a), Some(b)) => {
                 let delta = (a as i8).wrapping_sub(b as i8);
                 if delta > 0 {
-                    Some((0, a))
+                    Some((Slot::Zero, a))
                 } else {
-                    Some((1, b))
+                    Some((Slot::One, b))
                 }
             }
-            (Some(a), _) => Some((0, a)),
-            (_, Some(b)) => Some((1, b)),
+            (Some(a), _) => Some((Slot::Zero, a)),
+            (_, Some(b)) => Some((Slot::One, b)),
             (_, _) => None,
         }
     }
 
     /// Loads the serial number from a given slot.
-    fn serial(&self, i: usize) -> Option<u8> {
-        let base = self.pages[i] as *mut u64;
+    fn serial(&self, slot: Slot) -> Option<u8> {
+        let base = self.pages[slot as usize] as *mut u64;
         // Safety: we are confident that self.pages[i] is a valid pointer for
         // all i.
         let (header, trailer) = unsafe {
