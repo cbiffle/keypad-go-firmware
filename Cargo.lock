@@ -164,21 +164,21 @@ dependencies = [
 
 [[package]]
 name = "lilos"
-version = "1.0.1"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "958a883406e6502ae82cbe9d48d7442b8f154904dbedcacdef9037da6fdfe738"
+checksum = "d41a0a859200ba15c29299719e38b40a6675ae5dafe848cc058a0122a6c17ebe"
 dependencies = [
  "cfg-if",
  "cortex-m",
  "cortex-m-rt",
- "pin-project-lite",
+ "pin-project",
 ]
 
 [[package]]
 name = "lilos-handoff"
-version = "1.0.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7129402ee6143baf0a2f471294c15f1b9ff600ef766fb08d9205c62eb5830d74"
+checksum = "880b52558531506c5c5c6083555a7ef17ac0e8bd94dd19e20839cbeefdb3a1c6"
 dependencies = [
  "lilos",
  "scopeguard",
@@ -213,6 +213,26 @@ checksum = "ee8a3e1233d9073d76a870223512ce4eeea43c067a94a445c13bd6d792d7b1ab"
 dependencies = [
  "cortex-m",
  "cortex-m-semihosting",
+]
+
+[[package]]
+name = "pin-project"
+version = "1.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6bf43b791c5b9e34c3d182969b4abb522f9343702850a2e57f460d00d09b4b3"
+dependencies = [
+ "pin-project-internal",
+]
+
+[[package]]
+name = "pin-project-internal"
+version = "1.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f38a4412a78282e09a2cf38d195ea5420d15ba0602cb375210efbc877243965"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.18",
 ]
 
 [[package]]
