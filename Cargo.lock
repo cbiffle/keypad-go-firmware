@@ -149,7 +149,7 @@ dependencies = [
 
 [[package]]
 name = "keybad-fw"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
@@ -164,13 +164,14 @@ dependencies = [
 
 [[package]]
 name = "lilos"
-version = "1.1.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d41a0a859200ba15c29299719e38b40a6675ae5dafe848cc058a0122a6c17ebe"
+checksum = "090b27a32adb71568314e1c256f3f79b917e74194f0aba4d0e7493537e2820e9"
 dependencies = [
  "cfg-if",
  "cortex-m",
  "cortex-m-rt",
+ "lilos-list",
  "pin-project",
 ]
 
@@ -182,6 +183,15 @@ checksum = "880b52558531506c5c5c6083555a7ef17ac0e8bd94dd19e20839cbeefdb3a1c6"
 dependencies = [
  "lilos",
  "scopeguard",
+]
+
+[[package]]
+name = "lilos-list"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a0f878c972c8b8c28a03b0b433c7f4b0861de43de55fe04546fe44ff7fa32b8"
+dependencies = [
+ "pin-project",
 ]
 
 [[package]]
