@@ -84,7 +84,7 @@ pub async fn task(
     keymap: &[[u8; 8]; 8],
     setup_mode: bool,
     mut from_scanner: spsc::Popper<'_, scanner::KeyEvent>,
-    config_to_scanner: lilos_handoff::Pusher<'_, scanner::Config>,
+    config_to_scanner: lilos_watch::Sender<'_, scanner::Config>,
     mut bytes_to_i2c: spsc::Pusher<'_, u8>,
     storage: Storage,
 ) -> Infallible {
@@ -348,7 +348,7 @@ const SETTLE: Millis = Millis(100);
 /// so, during setup the I2C port will be dead.
 async fn setup(
     uart: Uart,
-    mut config_to_scanner: lilos_handoff::Pusher<'_, scanner::Config>,
+    config_to_scanner: lilos_watch::Sender<'_, scanner::Config>,
     mut from_scanner: lilos::spsc::Popper<'_, scanner::KeyEvent>,
     mut storage: Storage,
 ) -> Infallible {
@@ -360,14 +360,14 @@ async fn setup(
     // configuration has been applied (which will use this epoch).
     const SETUP_EPOCH: u8 = 0x55;
 
-    config_to_scanner.push(scanner::Config {
+    config_to_scanner.send(scanner::Config {
         // Recognizable epoch in case we raced the scan
         epoch: SETUP_EPOCH,
         // All lines should be driven during setup.
         driven_lines: 0xFF,
         // No ghost keys should be ignored, we want to know about everything.
         ghost_mask: [0; 8],
-    }).await;
+    });
 
     transmit(uart, concat!(
         "\r\n\
@@ -580,11 +580,11 @@ async fn setup(
 
     // Push the configuration over whether or not we saved it, so we can run the
     // demo loop.
-    config_to_scanner.push(scanner::Config {
+    config_to_scanner.send(scanner::Config {
         epoch: DEMO_EPOCH,
         driven_lines,
         ghost_mask,
-    }).await;
+    });
 
     transmit(uart, b"Running demo until reset:\r\n").await;
 

@@ -151,16 +151,18 @@ pub enum KeyState { #[default] Up, Down }
 
 /// Keypad scanner loop.
 ///
-/// Pass this its initial `config` plus a handoff channel through which it can
+/// Pass this its initial `config` plus a watch channel through which it can
 /// receive updated configs. It'll scan the provided GPIO port (pins 0-7) and
 /// emit events through `out_queue`.
 pub async fn task(
-    mut config: Config,
-    mut config_update: lilos_handoff::Popper<'_, Config>,
+    mut config_update: lilos_watch::Receiver<'_, Config>,
     gpio: device::gpio::Gpio,
     mut out_queue: spsc::Pusher<'_, KeyEvent>,
 ) -> Infallible {
     configure_pins(gpio);
+
+    // Make a copy of the config so we can be specific about changes.
+    let mut config = config_update.copy_current();
 
     let debouncers = DEBOUNCERS.take();
     let mut scan_gate = PeriodicGate::from(SCAN_INTERVAL);
@@ -168,42 +170,44 @@ pub async fn task(
         scan_gate.next_time().await;
 
         // Process any config update before starting the scan.
-        if let Some(new_config) = config_update.try_pop() {
-            // Handle any "killed" drive lines. This occurs when the
-            // `driven_lines` bit was 1 in the old config, and is becoming 0.
-            // When a drive line is killed we need to reset the state of its
-            // debouncers so they don't do anything.
-            for (line, debounce_row) in debouncers.iter_mut().enumerate() {
-                let line_mask = 1 << line;
-                let in_use_before = config.driven_lines & line_mask != 0;
-                let still_in_use = new_config.driven_lines & line_mask != 0;
-                if in_use_before && !still_in_use {
-                    for debouncer in debounce_row {
-                        *debouncer = Default::default();
+        if config_update.is_changed() {
+            config_update.glimpse_and_update(|new_config| {
+                // Handle any "killed" drive lines. This occurs when the
+                // `driven_lines` bit was 1 in the old config, and is becoming 0.
+                // When a drive line is killed we need to reset the state of its
+                // debouncers so they don't do anything.
+                for (line, debounce_row) in debouncers.iter_mut().enumerate() {
+                    let line_mask = 1 << line;
+                    let in_use_before = config.driven_lines & line_mask != 0;
+                    let still_in_use = new_config.driven_lines & line_mask != 0;
+                    if in_use_before && !still_in_use {
+                        for debouncer in debounce_row {
+                            *debouncer = Default::default();
+                        }
                     }
                 }
-            }
-            // Handle any "killed" keys. This occurs when the key's bit in the
-            // `ghost_mask` was not set before, but has become set. As in the
-            // killed line case, we need to reset its debouncer state.
-            //
-            // This is written using a range and indexing because, believe it or
-            // not, enumerate generates much larger code -- at least as of
-            // 1.75.0. This is because we're at opt-level="z", which makes dumb
-            // decisions like "not inlining the enumerate iterator for slices."
-            #[allow(clippy::needless_range_loop)]
-            for line in 0..8 {
-                for col in 0..8 {
-                    let col_mask = 1 << col;
-                    let real_before = config.ghost_mask[line] & col_mask == 0;
-                    let still_real = new_config.ghost_mask[line] & col_mask != 0;
-                    if real_before && !still_real {
-                        debouncers[line][col] = Default::default();
+                // Handle any "killed" keys. This occurs when the key's bit in the
+                // `ghost_mask` was not set before, but has become set. As in the
+                // killed line case, we need to reset its debouncer state.
+                //
+                // This is written using a range and indexing because, believe it or
+                // not, enumerate generates much larger code -- at least as of
+                // 1.75.0. This is because we're at opt-level="z", which makes dumb
+                // decisions like "not inlining the enumerate iterator for slices."
+                #[allow(clippy::needless_range_loop)]
+                for line in 0..8 {
+                    for col in 0..8 {
+                        let col_mask = 1 << col;
+                        let real_before = config.ghost_mask[line] & col_mask == 0;
+                        let still_real = new_config.ghost_mask[line] & col_mask != 0;
+                        if real_before && !still_real {
+                            debouncers[line][col] = Default::default();
+                        }
                     }
                 }
-            }
-            // Apply the config.
-            config = new_config;
+                // Apply the config.
+                config = *new_config;
+            });
         }
         // Config doesn't get modified anywhere else in this loop -- see:
         let config = &config;

@@ -155,7 +155,7 @@ dependencies = [
  "cortex-m-rt",
  "futures",
  "lilos",
- "lilos-handoff",
+ "lilos-watch",
  "panic-halt",
  "panic-semihosting",
  "scopeguard",
@@ -176,22 +176,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "lilos-handoff"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "880b52558531506c5c5c6083555a7ef17ac0e8bd94dd19e20839cbeefdb3a1c6"
-dependencies = [
- "lilos",
- "scopeguard",
-]
-
-[[package]]
 name = "lilos-list"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a0f878c972c8b8c28a03b0b433c7f4b0861de43de55fe04546fe44ff7fa32b8"
 dependencies = [
  "pin-project",
+]
+
+[[package]]
+name = "lilos-watch"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ecc69ac6a54f47745b880ee28f1e13c72dd8d891f59223f65f31bc7b7a598f33"
+dependencies = [
+ "lilos",
 ]
 
 [[package]]

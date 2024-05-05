@@ -277,10 +277,10 @@ fn main() -> ! {
     let mut scan_event_q = pin!(Queue::new(SCAN_EVENT_Q.take()));
     let (scan_event_from_scanner, scan_event_to_serial) = scan_event_q.split();
 
-    // Allocate the serial-to-scanner synchronous config handoff (no storage
-    // required)
-    let mut config_handoff = lilos_handoff::Handoff::new();
-    let (config_to_scanner, config_from_serial) = config_handoff.split();
+    // Allocate the serial-to-scanner synchronous config watcher.
+    let config_watch = lilos_watch::Watch::new(cfg.scanner);
+    let config_to_scanner = config_watch.sender();
+    let config_from_serial = config_watch.subscribe();
 
     // Create the serial-to-I2C byte queue using static storage.
     let mut i2c_byte_q = pin!(Queue::new(I2C_Q.take()));
@@ -298,7 +298,6 @@ fn main() -> ! {
     ));
 
     let scanner_task = pin!(scanner::task(
-        cfg.scanner,
         config_from_serial,
         gpioa,
         scan_event_from_scanner,

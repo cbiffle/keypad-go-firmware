@@ -17,14 +17,12 @@ futures = { version = "0.3.28", default-features = false, features = ["async-awa
 panic-halt = {optional = true, version = "0.2.0"}
 panic-semihosting = {optional = true, version = "0.6.0"}
 scopeguard = { version = "1.1.0", default-features = false }
+lilos-watch = "0.1"
 
 [dependencies.lilos]
-version = "1.0.0"
+version = "1.2"
 default-features = false
 features = ["spsc", "systick"]
-
-[dependencies.lilos-handoff]
-version = "1.0.0"
 
 [dependencies.stm32-metapac]
 default-features = false
